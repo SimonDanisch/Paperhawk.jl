@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Fail closed. Cap anonymous/data allocations at 6 GiB and total address space
+# (including GPU mappings) at 12 GiB. No exhaustive allocation tracing.
+ulimit -d 6291456
+ulimit -v 12582912
+ulimit -c 0
+# Keep native allocator arenas bounded and return large, non-pooled image
+# blocks via mmap/munmap; glibc's adaptive threshold otherwise retains them.
+export MALLOC_ARENA_MAX=2
+export MALLOC_MMAP_THRESHOLD_=131072
+exec julia --compiled-modules=existing --threads=4,1 --gcthreads=8,1 --heap-size-hint=2G "$@"

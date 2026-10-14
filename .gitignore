@@ -1,0 +1,15 @@
+# Local clones of the unregistered GPU stack, developed in place.
+/dev/
+# Model exports and scratch scripts.
+/gen/
+# Scans and the document archive: private documents, never committed.
+/scans/
+/mein-archiv/
+# Manifests record local development paths.
+Manifest.toml
+# Editor and agent state.
+/.bonitoAgents/
+/.bt-attachments/
+# Python environment for the model exports.
+/tools/py/.venv/
+__pycache__/
