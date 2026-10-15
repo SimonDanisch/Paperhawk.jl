@@ -12,9 +12,8 @@ Korrektur der Kategorie ändert weder Reihenfolge noch Nummer oder PDF-Pfad.
 Paperhawk archiviert aus der Oberfläche heraus (**Geprüft · Archivieren**, siehe
 `docs/gui.md`). Mit `scanner(; classify = true)` fasst das lokale LLM jedes
 archivierte Dokument im Hintergrund zusammen. Ein neues Archiv beginnt bei 1;
-beim späteren Weiterarbeiten setzt es die Nummerierung fort. Nummernblätter oder
-Beschriftungen auf dem Papier sind nicht nötig. Die Kategorie dient zum
-digitalen Finden, abgeheftet wird in Scan-Reihenfolge.
+beim späteren Weiterarbeiten setzt es die Nummerierung fort. Die Kategorie
+dient zum digitalen Finden, abgeheftet wird in Scan-Reihenfolge.
 
 Durchsuchen und korrigieren aus Julia:
 
