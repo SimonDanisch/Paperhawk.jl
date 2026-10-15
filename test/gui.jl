@@ -1,6 +1,5 @@
-# GLMakie interaction smoke test; run in the main project on a local display:
-# using Test, Paperhawk, GLMakie; include("test/gui.jl")
-using Test, Paperhawk, GLMakie
+# The native window and its actions, on the local display.
+using GLMakie
 
 @testset "native window lifecycle" begin
     mktempdir() do dir
@@ -41,9 +40,9 @@ end
 @testset "scanner GUI actions" begin
     mktempdir() do dir
         function process(src,corners,rotation,out)
-            img=Paperhawk.permutedims(Paperhawk.load(src))
+            img=permutedims(load(src))
             angle=something(rotation,0)
-            Paperhawk.save(out,Paperhawk.permutedims(turn(img,angle)))
+            save(out,permutedims(turn(img,angle)))
             (words=[Paperhawk.Word("Rechnung",10,15,60,12,15,12,70f0)],blank=false,rotation=angle)
         end
         archive=DocumentArchive(joinpath(dir,"archive"))
@@ -55,16 +54,15 @@ end
             shown_live()=left.scene.plots[1][3][]
             for color in (Paperhawk.RGB{Paperhawk.N0f8}(1,0,0),Paperhawk.RGB{Paperhawk.N0f8}(0,0,1))
                 lock(ui.frame_lock) do
-                    ui.latest=(image=fill(color,80,60),state=:captured,paused=true,error="",captured=0)
+                    ui.latest=(image=fill(color,80,60),outline=Point2f[],state=:captured,paused=true,error="",captured=0)
                 end
-                @test timedwait(()->size(shown_live())==(60,80) && all(==(color),shown_live()),5)==:ok
+                @test timedwait(()->size(shown_live())==(80,60) && all(==(color),shown_live()),5)==:ok
             end
-            baseline=Paperhawk.SCAN_ACTIVE[]
             ui.running[]=true
             click(:pause)
-            @test Paperhawk.SCAN_ACTIVE[]==baseline+1
+            @test !ui.paused[]
             click(:pause)
-            @test Paperhawk.SCAN_ACTIVE[]==baseline
+            @test ui.paused[]
             ui.running[]=false
             id=review_add!(draft,fill(Paperhawk.RGB{Paperhawk.N0f8}(0.6,0.6,0.6),100,140))
             review_wait(draft);ui.selected[]=id;sleep(0.3)
@@ -143,7 +141,7 @@ end
             if width==1200 && Threads.atomic_add!(calls,1)==0
                 put!(entered,true);take!(release)
             end
-            pixels=Paperhawk.permutedims(Paperhawk.load(path))
+            pixels=permutedims(load(path))
             (pixels=pixels,extent=(0,0,100,140),fullsize=(100,140))
         end
         ui=scanner_gui(;draft,image_loader=loader)

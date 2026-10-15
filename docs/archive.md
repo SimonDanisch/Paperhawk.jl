@@ -7,65 +7,36 @@ Ein mehrseitiges Dokument behält eine gemeinsame Nummer. Kategorie, Absender,
 Datum, Titel und OCR-Text stehen in einer lokalen SQLite-Datenbank. Eine spätere
 Korrektur der Kategorie ändert weder Reihenfolge noch Nummer oder PDF-Pfad.
 
-## Vorbereitung
+## Archivieren und Finden
+
+Paperhawk archiviert aus der Oberfläche heraus (**Geprüft · Archivieren**, siehe
+`docs/gui.md`). Mit `scanner(; classify = true)` fasst das lokale LLM jedes
+archivierte Dokument im Hintergrund zusammen. Ein neues Archiv beginnt bei 1;
+beim späteren Weiterarbeiten setzt es die Nummerierung fort. Nummernblätter oder
+Beschriftungen auf dem Papier sind nicht nötig. Die Kategorie dient zum
+digitalen Finden, abgeheftet wird in Scan-Reihenfolge.
+
+Durchsuchen und korrigieren aus Julia:
 
 ```julia
 using Paperhawk
-
-# Einmalig werden die Modellgewichte geladen, danach bleiben sie lokal.
-classifier = BonsaiClassifier()   # Bonsai 2, 27B, ternär quantisiert, GPU
-archive = DocumentArchive("mein-archiv"; classifier)
-```
-
-Ein neues Archiv beginnt bei 1; beim späteren Weiterarbeiten setzt es die
-Nummerierung fort. Nummernblätter oder Beschriftungen auf dem Papier sind dafür
-nicht nötig. Die Kategorie dient zum digitalen Finden, abgeheftet wird weiterhin
-in Scan-Reihenfolge.
-
-## Scannen und Finden
-
-```julia
-cam = PhoneCamera()
-ocr = PaddleOCR()
-# Für Dokumente aus jeweils einem beidseitigen Blatt:
-scanner = start(cam; ocr, archive, duplex=true, duplex_order=:interleaved,
-                grouping=:sheet, trigger=Trigger(hold=0.25))
-# Blatt 1 vorne, Blatt 1 hinten, Blatt 2 vorne, Blatt 2 hinten, …
-pdfs = stop!(scanner)
-close(cam); close(ocr)
-
-# Die PDFs existieren bereits. Auf die Metadaten nur warten, wenn benötigt:
-records = wait_archive(archive)
+archive = DocumentArchive(Paperhawk.data_dir("archiv"))
 search_documents(archive, "Stadtwerke März")
 search_documents(archive; category="Rechnungen", date_from="2026-01-01", date_to="2026-12-31")
 search_documents(archive; number=1)
 document_record(archive, 1)
 update_document!(archive, 1; title="Strom März 2026", category="Rechnungen")
-
-close(archive)       # ausstehende Klassifikationen abschließen
-close(classifier)
+close(archive)
 ```
 
-`grouping=:sheet` vergibt eine Nummer je physischem Blatt. Bei Duplex gehören
-Vorder- und Rückseite zusammen. Für Dokumente mit mehreren Blättern verwende
-`grouping=:batch` (Standard) und beende den Scan mit `stop!` nach dem jeweiligen
-Dokument. Der nächste Scan im selben Archiv erhält die nächste Nummer.
+Ohne Oberfläche, mit eigenem Klassifikator auf einer bestimmten GPU:
 
-Zwei Aufnahmereihenfolgen werden unterstützt:
-
-- `duplex_order=:interleaved`: ein Blatt vorne aufnehmen, umdrehen, hinten
-  aufnehmen, dann das nächste Blatt.
-- `duplex_order=:stack`: erst alle Vorderseiten, dann die Rückseiten in
-  umgekehrter Blattreihenfolge. Das ist der bisherige Duplex-Ablauf.
-
-Auch leere Rückseiten aufnehmen: Sie werden beim Zusammenstellen entfernt,
-ihre Zuordnung zum Blatt bleibt in der Datenbank erhalten. Bei einer ungeraden
-Anzahl Duplex-Aufnahmen stoppt die Archivierung vor der Nummernvergabe. Eine
-gerade Anzahl beweist allerdings nicht, dass kein Blatt ausgelassen wurde;
-die gewählte Reihenfolge muss eingehalten werden. Der Bildinhalt allein kann
-Vorder- und Rückseiten nicht eindeutig zuordnen. Die automatische Erkennung
-von Dokumentgrenzen bei gemischten mehrblättrigen Dokumenten ist nicht implementiert.
-UVDoc kann mit `dewarper=uvdoc()` zugeschaltet werden.
+```julia
+classifier = BonsaiClassifier(; select = "RTX 4000")   # Bonsai 2, 27B, ternär quantisiert
+archive = DocumentArchive(Paperhawk.data_dir("archiv"); classifier)
+records = wait_archive(archive)   # wartet auf die ausstehenden Zusammenfassungen
+close(archive); close(classifier)
+```
 
 ## Dateien und Modell
 
@@ -85,8 +56,8 @@ der Datenbank. Bestehende Archive werden beim Öffnen automatisch indiziert und
 nach einem unterbrochenen Update abgeglichen. In `numbers/` stehen vergebene
 Nummern, in `sources/` die Zuordnungen zu Rohaufnahmen. Zum Sichern das Archiv
 schließen und den gesamten Ordner kopieren. Nur ein Schreiber kann ein Archiv
-gleichzeitig öffnen. Wiederholtes Importieren derselben Rohdateipfade liefert
-das bereits archivierte Dokument zurück.
+gleichzeitig öffnen. Wiederholtes Archivieren derselben Aufnahmen liefert das
+bereits archivierte Dokument zurück, auch nach einem unterbrochenen Archivieren.
 
 Die Klassifikation liest ausschließlich den OCR-Text lokal über BonsaiRunner.
 Sie läuft nach dem Speichern in einer Warteschlange. Modell und OCR teilen sich
@@ -106,15 +77,3 @@ Bei Bedarf `BonsaiClassifier(context=8192)` verwenden; das benötigt mehr Speich
 Eigene Kategorien können beim Erstellen eines neuen Archivs mit
 `DocumentArchive(path; classifier, categories=["Rechnungen", "Briefe", "Sonstiges"])`
 festgelegt werden. Die Auswahl wird in `archive.toml` gespeichert.
-
-## Erprobter Stand
-
-Am 10.10.2026 auf der Radeon RX 7900 XTX getestet: Eine gerenderte
-Beispielrechnung wurde mit PP-OCRv6 gelesen, als `000001.pdf` gespeichert und
-von Bonsai mit richtigem Absender, Datum und Kategorie versehen. PDF-Speichern
-und Einreihen dauerten nach abgeschlossener OCR 0,32 Sekunden, die nachgelagerte
-Klassifikation 25 Sekunden. Ein weiterer synthetischer Versicherungsbrief
-wurde in 19,3 Sekunden korrekt zugeordnet. Das sind einzelne Beispiele,
-kein Qualitätstest über eine größere Dokumentensammlung. Der erste LLM-Aufruf
-benötigte einschließlich Kompilierung 60 Sekunden; das erste Laden und OCR
-haben zusätzliche Kompilierungskosten.

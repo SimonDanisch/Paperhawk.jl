@@ -44,88 +44,62 @@ function parse_classification(raw::AbstractString, categories)
 end
 
 """
-    BonsaiClassifier(; context=4096, max_tokens=256, path=nothing)
+    BonsaiClassifier(ocr::PaddleOCR; context = 4096, max_tokens = 256, path = nothing)
+    BonsaiClassifier(; select = anygpu, context = 4096, max_tokens = 256, path = nothing)
 
-Local document classification through BonsaiRunner in the scanner's background
-process. Each document gets a fresh session, closed after
-use, so documents cannot leak into each other's context. Loading is explicit;
-importing Paperhawk never downloads or initializes the LLM.
+Local document classification with Ternary-Bonsai-2 27B through BonsaiRunner.
+Each document gets a fresh session, closed after use, so documents cannot leak
+into each other's context. Loading is explicit; importing Paperhawk never
+downloads or initializes the LLM.
+
+The first form shares the OCR engine's thread and device and gives way to it:
+before every prompt chunk and every generated token it waits while pages are
+queued or the camera is capturing. The second takes the device `select` names
+for itself. Close the classifier before the OCR engine it shares.
 """
-struct BonsaiClassifier{M}
-    model::M
-    requests::Channel{Any}
-    worker::Task
+struct BonsaiClassifier
+    worker::GPUWorker
     max_tokens::Int
+    demand::Union{Nothing, Threads.Atomic{Int}}
 end
 
-struct ProcessClassifier
-    pid::Int
-    id::Int
-end
+bonsai(device; context, path) = path === nothing ? BonsaiRunner.Bonsai2(; context, device) :
+    BonsaiRunner.Bonsai2(path; context, device)
 
-function BonsaiClassifier(; context::Int=4096, max_tokens::Int=256, path=nothing, device=nothing,kw...)
+function BonsaiClassifier(ocr::PaddleOCR; context::Int = 4096, max_tokens::Int = 256, path = nothing)
     context > max_tokens > 0 || throw(ArgumentError("context must exceed max_tokens > 0"))
-    device===nothing && return process_model(:classifier,(;context,max_tokens,path,kw...))
-    model = path === nothing ? BonsaiRunner.Bonsai2(; context,device,kw...) : BonsaiRunner.Bonsai2(path; context,device,kw...)
-    return BonsaiClassifier(model; max_tokens)
+    worker = GPUWorker(reader -> bonsai(reader.device; context, path), ocr.worker, "classifier")
+    return BonsaiClassifier(worker, max_tokens, ocr.demand)
 end
 
-"""Load Bonsai on the OCR engine's owning thread and device; classification stays asynchronous."""
-function BonsaiClassifier(ocr::PaddleOCR;kw...)
-    ongpu(ocr) do reader
-        BonsaiClassifier(;device=reader.model.det.device,kw...)
-    end
+function BonsaiClassifier(; select = anygpu, context::Int = 4096, max_tokens::Int = 256, path = nothing)
+    context > max_tokens > 0 || throw(ArgumentError("context must exceed max_tokens > 0"))
+    worker = GPUWorker(() -> bonsai(Mantle.Device(select); context, path), "classifier")
+    return BonsaiClassifier(worker, max_tokens, nothing)
 end
 
 """
-    BonsaiClassifier(model; max_tokens = 256)
+    classifier(text, categories) -> (; metadata, raw, model)
 
-Classify with `model`, which the classifier then owns: `close` frees it on the
-thread that serves the requests, this one.
+The document's metadata as the model reads it from `text`, one of `categories`.
 """
-function BonsaiClassifier(model; max_tokens::Int=256)
-    model.maxcontext > max_tokens > 0 || throw(ArgumentError("context must exceed max_tokens > 0"))
-    requests = Channel{Any}(Inf)
-    worker = @async try
-      for (text, categories, reply) in requests
-        result = try
-            system, user = classification_prompt(text, categories)
-            prompt = BonsaiRunner.chatprompt(["system"=>system, "user"=>user]; thinking=false)
-            ids = BonsaiRunner.encode(model.tokenizer, prompt)
-            length(ids) + max_tokens <= model.maxcontext || throw(ArgumentError(
-                "Document exceeds the model context; increase context or split it for review."))
-            wait_for_ocr()
-            s = BonsaiRunner.session(model; kv_page=min(model.maxcontext,4096))
-            raw = try
-                BonsaiRunner.decode(model.tokenizer, BonsaiRunner.generate(s, ids; max_tokens,
-                    prefill_chunk=64,before_step=wait_for_ocr))
-            finally
-                close(s)
-            end
-            ((metadata=parse_classification(raw,categories), raw=raw,
-              model="Ternary-Bonsai-2-27B-PTQ1_0"), nothing)
-        catch err
-            (nothing, err isa OutOfMemoryError ? err : CapturedException(err, catch_backtrace()))
-        end
-        put!(reply, result)
-      end
-    finally
-        close(model)
-    end
-    errormonitor(worker)
-    return BonsaiClassifier(model,requests,worker,max_tokens)
-end
-
 function (c::BonsaiClassifier)(text, categories)
-    reply = Channel{Any}(1)
-    put!(c.requests,(text,categories,reply))
-    result, err = take!(reply)
-    err === nothing || throw(err)
-    return result
+    ongpu(c.worker) do model
+        system, user = classification_prompt(text, categories)
+        prompt = BonsaiRunner.chatprompt(["system" => system, "user" => user]; thinking = false)
+        ids = BonsaiRunner.encode(model.tokenizer, prompt)
+        length(ids) + c.max_tokens <= model.maxcontext || throw(ArgumentError(
+            "Document exceeds the model context; increase context or split it for review."))
+        yield_to(c.demand)
+        s = BonsaiRunner.session(model; kv_page = min(model.maxcontext, 4096))
+        raw = try
+            BonsaiRunner.decode(model.tokenizer, BonsaiRunner.generate(s, ids; c.max_tokens,
+                prefill_chunk = 64, before_step = () -> yield_to(c.demand)))
+        finally
+            close(s)
+        end
+        (metadata = parse_classification(raw, categories), raw = raw, model = "Ternary-Bonsai-2-27B-PTQ1_0")
+    end
 end
 
-function Base.close(c::BonsaiClassifier)
-    close(c.requests)
-    wait(c.worker)
-    return nothing
-end
+Base.close(c::BonsaiClassifier) = close(c.worker)

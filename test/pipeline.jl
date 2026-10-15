@@ -5,7 +5,7 @@
     ocr=PaddleOCR()
     try
         shown=Ref{Any}(nothing)
-        result=Paperhawk.prepare_page_image(image;ocr,image_ready=img->(shown[]=copy(img)))
+        result=process_page(ocr,image;image_ready=img->(shown[]=copy(img)))
         # image_ready runs on the GPU thread before recognition, with the final pixels.
         @test shown[]==result.image
         mktempdir() do dir
@@ -26,41 +26,48 @@
     end
 end
 
-@testset "background GPU work yields to OCR" begin
-    Paperhawk.Threads.atomic_add!(Paperhawk.OCR_PENDING,1)
-    ready=Ref(false)
-    task=@async begin
-        Paperhawk.wait_for_ocr()
-        ready[]=true
-    end
-    try
-        sleep(0.02)
-        @test !ready[]
-    finally
-        Paperhawk.Threads.atomic_sub!(Paperhawk.OCR_PENDING,1)
-    end
-    wait(task)
-    @test ready[]
-end
-
-@testset "background GPU work waits for capture and queued OCR" begin
-    Threads.atomic_add!(Paperhawk.SCAN_ACTIVE,1)
-    Threads.atomic_add!(Paperhawk.OCR_PENDING,1)
-    task=@async Paperhawk.wait_for_ocr()
-    scanning=true
-    try
-        sleep(0.02)
-        @test !istaskdone(task)
-        Threads.atomic_sub!(Paperhawk.SCAN_ACTIVE,1)
-        scanning=false
-        sleep(0.02)
-        @test !istaskdone(task) # pausing capture alone must not delay queued OCR
-    finally
-        scanning && Threads.atomic_sub!(Paperhawk.SCAN_ACTIVE,1)
-        Threads.atomic_sub!(Paperhawk.OCR_PENDING,1)
-    end
+@testset "background GPU work yields to foreground demand" begin
+    # Capture and a queued page each hold the demand; background work goes on
+    # only when both have let go.
+    demand=Threads.Atomic{Int}(0)
+    Threads.atomic_add!(demand,1) # the camera is capturing
+    Threads.atomic_add!(demand,1) # a page is queued
+    task=@async Paperhawk.yield_to(demand)
+    sleep(0.02)
+    @test !istaskdone(task)
+    Threads.atomic_sub!(demand,1) # capture paused
+    sleep(0.02)
+    @test !istaskdone(task) # the queued page still comes first
+    Threads.atomic_sub!(demand,1)
     @test timedwait(()->istaskdone(task),5)==:ok
     fetch(task)
+    # Without an engine to give way to, background work never waits.
+    @test Paperhawk.yield_to(nothing)===nothing
+end
+
+@testset "a queued page holds the engine's demand until it is read" begin
+    ocr=PaddleOCR()
+    release=Channel{Nothing}(1)
+    try
+        mktempdir() do dir
+            s=ReviewSession(dir;duplex=false,ocr)
+            try
+                # Keep the engine busy with a request that is not demand itself.
+                busy=Threads.@spawn Paperhawk.ongpu(_->take!(release),ocr.worker)
+                review_add!(s,fill(RGB{N0f8}(1,1,1),160,220))
+                @test timedwait(()->ocr.demand[]>=1,5)==:ok
+                put!(release,nothing);fetch(busy)
+                review_wait(s)
+                @test ocr.demand[]==0
+                @test only(s.entries).status==:ready
+            finally
+                close(s)
+            end
+        end
+    finally
+        isready(release) || put!(release,nothing)
+        close(ocr)
+    end
 end
 
 @testset "capture buffers are bounded and originals survive reuse" begin

@@ -100,37 +100,36 @@ function save_record!(a::DocumentArchive,r)
     return r
 end
 
-"""Reserve permanent numbers for paper cover sheets. Unused numbers are never recycled."""
-function reserve_numbers!(a::DocumentArchive,count::Integer=1)
-    0 < count <= 10_000 || throw(ArgumentError("count must be 1..10000"))
-    lock(a.lock) do
-        isopen(a.jobs) || throw(ArgumentError("archive is closed"))
-        existing = [parse(Int,n) for n in readdir(joinpath(a.root,"numbers")) if occursin(r"^\d+$",n)]
-        n = isempty(existing) ? 1 : maximum(existing)+1
-        numbers = Int[]
-        while length(numbers) < count
-            dir = joinpath(a.root,"numbers",document_number(n))
-            try
-                mkdir(dir) # atomic allocation, also against another process
-                push!(numbers,n)
-            catch
-                isdir(dir) || rethrow()
-            end
-            n += 1
-        end
-        return numbers
+"""
+    claim_number!(archive) -> n
+
+The next free document number, taken for good: a directory under `numbers`.
+One writer per archive (its pidfile) makes this race-free. Numbers are never
+recycled.
+"""
+function claim_number!(a::DocumentArchive)
+    existing = [parse(Int,n) for n in readdir(joinpath(a.root,"numbers")) if occursin(r"^\d+$",n)]
+    n = isempty(existing) ? 1 : maximum(existing)+1
+    while true
+        dir = joinpath(a.root,"numbers",document_number(n))
+        isdir(dir) || (mkdir(dir); return n)
+        n += 1
     end
 end
 
-"""
-    archive_document!(archive, pages; text, sources=[], number=nothing) -> record
+"""The first few words of a document's text, for its title."""
+title(text::AbstractString; words::Int = 8) = join(first(split(text), words), ' ')
 
-Save a document under a new number or a pre-reserved cover-sheet number.
-The source capture paths make repeated `stop!`/`make_pdfs` calls idempotent.
-Existing numbered documents are never overwritten by a different capture.
+"""
+    archive_document!(archive, pages; text, sources=[], sides=nothing) -> record
+
+Save a document under the next number. The source capture paths make a
+repeated or interrupted commit idempotent: the same captures get the same
+number, and an existing numbered document is never overwritten by a different
+capture.
 """
 function archive_document!(a::DocumentArchive,pages::AbstractVector{PDFPage}; text::AbstractString,
-        sources::AbstractVector{<:AbstractString}=String[], number::Union{Nothing,Integer}=nothing,sides=nothing)
+        sources::AbstractVector{<:AbstractString}=String[], sides=nothing)
     isempty(pages) && throw(ArgumentError("cannot archive an empty document"))
     if sides !== nothing
         numbered = [s["pdf_page"] for s in sides if s["pdf_page"] !== nothing]
@@ -147,15 +146,14 @@ function archive_document!(a::DocumentArchive,pages::AbstractVector{PDFPage}; te
         src = abspath.(sources)
         sourcekey = isempty(src) ? "" : bytes2hex(SHA.sha256(JSON3.write(src)))
         sourcefile = joinpath(a.root,"sources",sourcekey*".json")
-        if !isempty(sourcekey) && isfile(sourcefile)
+        n = if !isempty(sourcekey) && isfile(sourcefile)
             old = JSON3.read(read(sourcefile,String),Dict{String,Any})["number"]
-            number === nothing || number == old || throw(ArgumentError("capture already belongs to document $old"))
             isfile(recordpath(a,old)) && return document_record(a,old)
-            number = old # recover a previously interrupted write with the same number
+            old # recover a previously interrupted write with the same number
+        else
+            claim_number!(a)
         end
-        n = number === nothing ? only(reserve_numbers!(a)) : Int(number)
         label = document_number(n)
-        isdir(joinpath(a.root,"numbers",label)) || throw(ArgumentError("number $label has not been reserved in this archive"))
         if isfile(recordpath(a,n))
             old = document_record(a,n)
             !isempty(sourcekey) && old["source_key"] == sourcekey && return old
@@ -293,26 +291,21 @@ function retry_classification!(a::DocumentArchive,n::Integer)
 end
 
 """
-    number_sheets(archive, path; count=10, dpi=150) -> numbers
+    pending_classifications(archive) -> count, or nothing while the archive is busy
 
-Reserve numbers and print one QR cover sheet per document. Place each cover
-BEFORE its document; the scanner uses its number and omits the cover from the
-PDF. Keep the cover with the paper original in the physical folder.
+How many documents still wait for their summary. Returns at once: `nothing`
+when another task holds the archive.
 """
-function number_sheets(a::DocumentArchive,path::AbstractString; count::Int=10,dpi=150)
-    numbers = reserve_numbers!(a,count)
-    pages = PDFPage[]
-    for n in numbers
-        w,h = paper_size(:a4;dpi)
-        img = fill(Gray(true),w,h)
-        code = qr_image("ASCANNER:DOC:"*document_number(n);module_size=max(1,round(Int,2.5dpi/25.4)))
-        cw,ch = size(code)
-        x0,y0 = (w-cw)÷2,(h-ch)÷2
-        img[x0+1:x0+cw,y0+1:y0+ch] .= code
-        label = Word("Dokument "*document_number(n),round(Int,.2w),round(Int,.2h),0,0,
-            round(Int,.2h),round(Int,.05h),100)
-        push!(pages,PDFPage(img,[label];dpi,visible=true))
+function pending_classifications(a::DocumentArchive)
+    trylock(a.lock) || return nothing
+    try
+        rows = DBInterface.execute(a.db, "SELECT count(*) AS n FROM documents WHERE status='pending'")
+        try
+            return only(Int(r.n) for r in rows)
+        finally
+            DBInterface.close!(rows)
+        end
+    finally
+        unlock(a.lock)
     end
-    write_pdf(path,pages;title="Paperhawk Dokumentnummern")
-    return numbers
 end

@@ -66,28 +66,55 @@ function review_save!(s::ReviewSession)
     s.version += 1
 end
 
-struct ReviewProcessor{O,D}
-    ocr::O
+"""
+    ReviewProcessor(ocr, dpi, dewarp; workers = 2)
+
+What a draft's pages are processed with: the OCR engine, the resolution,
+whether UVDoc straightens them, and one reusable output image per page in
+flight.
+"""
+struct ReviewProcessor
+    ocr::PaddleOCR
     dpi::Int
-    dewarper::D
+    dewarp::Bool
     outputs::Channel{Any}
 end
-function ReviewProcessor(ocr,dpi,dewarper;workers=2)
+function ReviewProcessor(ocr::PaddleOCR,dpi::Int,dewarp::Bool;workers=2)
     slots=Channel{Any}(workers)
     for _ in 1:workers;put!(slots,Ref{Any}(nothing));end
-    ReviewProcessor(ocr,dpi,dewarper,slots)
+    ReviewProcessor(ocr,dpi,dewarp,slots)
 end
 function (p::ReviewProcessor)(source,corners,rotation,output;kw...)
     buffer=take!(p.outputs)
     try
-        review_prepare(source,corners,rotation,output;ocr=p.ocr,dpi=p.dpi,dewarper=p.dewarper,output_buffer=buffer,kw...)
+        review_prepare(source,corners,rotation,output;ocr=p.ocr,dpi=p.dpi,dewarp=p.dewarp,output_buffer=buffer,kw...)
     finally
         put!(p.outputs,buffer)
     end
 end
 
-function review_prepare(source,corners,rotation,output;ocr,dpi,dewarper,image_saved=()->nothing,output_buffer=nothing)
-    ocr isa ProcessOCR && return process_review(source,corners,rotation,output;ocr,dpi,dewarper,image_saved)
+"""The OCR engine whose demand a draft's queued pages raise; none for a custom processor."""
+engine(p::ReviewProcessor)=p.ocr
+engine(_)=nothing
+
+# The OCR processor reads a fresh capture from the pixels still in memory; a
+# custom processor, as tests pass, gets the saved original's path.
+input(::ReviewProcessor,pixels::AbstractMatrix,source)=pixels
+input(_,pixels,source)=source
+
+# A custom processor is called with the page alone; only the OCR processor
+# shows its image before the words are read.
+process(p::ReviewProcessor,args...;image_saved)=p(args...;image_saved)
+process(p,args...;image_saved)=p(args...)
+
+# The output images a processor lends its pages, dropped when the draft closes.
+function release_outputs(p::ReviewProcessor)
+    close(p.outputs)
+    while isready(p.outputs);take!(p.outputs);end
+end
+release_outputs(_)=nothing
+
+function review_prepare(source,corners,rotation,output;ocr,dpi,dewarp,image_saved=()->nothing,output_buffer=nothing)
     image = source isa AbstractMatrix ? source : review_load_image(source)
     saving=Ref{Union{Nothing,Task}}(nothing)
     function image_ready(processed)
@@ -99,7 +126,7 @@ function review_prepare(source,corners,rotation,output;ocr,dpi,dewarper,image_sa
         end
     end
     result=try
-        prepare_page_image(image;ocr,dpi,dewarper,rotation,image_ready,corners,output_buffer)
+        process_page(ocr,image;dpi,dewarp,rotation,image_ready,corners,output=output_buffer)
     finally
         saving[]===nothing || fetch(saving[])
     end
@@ -107,9 +134,10 @@ function review_prepare(source,corners,rotation,output;ocr,dpi,dewarper,image_sa
 end
 
 """
-    ReviewSession(dir; duplex=true, dpi=300, ocr=default_ocr(), dewarper=nothing, workers=2)
+    ReviewSession(dir; duplex=true, dpi=300, ocr=PaddleOCR(), dewarp=false, workers=2)
 
-Persistent editable scan draft. Reopen the same directory to recover captures
+Persistent editable scan draft. Without `ocr` the draft makes its own engine
+and closes it with the draft; `dewarp` straightens pages with UVDoc first. Reopen the same directory to recover captures
 and corrections. Front/back pairs are captured consecutively; each front starts
 one document initially. Use `review_edit!(s,id;starts=false)` to join documents.
 Closing drains OCR jobs; it does not archive or delete the draft.
@@ -117,7 +145,7 @@ At most `workers` pages are prepared concurrently; the GPU engine serializes
 its own model buffers. Fresh captures use their retained pixels, with original
 PNG persistence alongside processing and corrected image saving alongside OCR.
 """
-function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=nothing,dewarper=nothing,processor=nothing,workers::Int=2)
+function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=nothing,dewarp::Bool=false,processor=nothing,workers::Int=2)
     workers>0 || throw(ArgumentError("workers must be positive"))
     dir=abspath(dir); mkpath(dir)
     for name in ("raw","processed") mkpath(joinpath(dir,name)) end
@@ -140,15 +168,15 @@ function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=no
     end
     owns_ocr=processor===nothing && ocr===nothing
     if processor === nothing
-        ocr === nothing && (ocr=default_ocr())
-        processor=ReviewProcessor(ocr,dpi,dewarper;workers)
+        ocr === nothing && (ocr=PaddleOCR())
+        processor=ReviewProcessor(ocr,dpi,dewarp;workers)
     end
     jobs=Channel{Any}(Inf)
     buffers=Channel{Any}(4)
     for _ in 1:4;put!(buffers,nothing);end
     s=ReviewSession(dir,entries,Vector{ReviewEntry}[],nextid,duplex,dpi,jobs,Task(()->nothing),ReentrantLock(),0,processor,committed,started,buffers,owns_ocr)
     function process_job(job)
-        id,rev,img,source,foreground,processing_pid,capture=job
+        id,rev,img,source,held,capture=job
         try
             # Persist originals even if an edit has already superseded this
             # processing job. Undo and replacement recovery still need them.
@@ -173,14 +201,9 @@ function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=no
             end
             entry === nothing && return
             result=fetch(Threads.@spawn begin
-                input=s.processor isa ReviewProcessor && !(s.processor.ocr isa ProcessOCR) && pixels isa AbstractMatrix ? pixels : entry.source
-                if s.processor isa ReviewProcessor
-                    s.processor(input,entry.corners,entry.rotation,entry.output;image_saved=()->lock(s.lock) do
-                        s.version+=1
-                    end)
-                else
-                    s.processor(input,entry.corners,entry.rotation,entry.output)
-                end
+                process(s.processor,input(s.processor,pixels,entry.source),entry.corners,entry.rotation,entry.output;image_saved=()->lock(s.lock) do
+                    s.version+=1
+                end)
             end)
             lock(s.lock) do
                 i=findfirst(e->e.id==id,s.entries)
@@ -199,8 +222,7 @@ function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=no
                 end
             end
         finally
-            foreground && Threads.atomic_sub!(OCR_PENDING,1)
-            process_ocr_activity(processing_pid,-1)
+            hold!(held,-1)
             capture===nothing || put!(capture.pool,capture.pixels)
         end
     end
@@ -236,17 +258,16 @@ function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=no
     return s
 end
 
+# A queued page is foreground demand on the engine from the moment it is
+# queued, so background classification gives way before the page reaches it.
 function review_enqueue!(s,job)
-    foreground=s.processor isa ReviewProcessor && s.processor.ocr isa Union{PaddleOCR,ProcessOCR}
-    processing_pid=foreground ? (s.processor.ocr isa ProcessOCR ? s.processor.ocr.pid : PROCESS_PID[]) : 0
-    foreground && Threads.atomic_add!(OCR_PENDING,1)
-    process_ocr_activity(processing_pid,1)
+    held=engine(s.processor)
+    hold!(held,1)
     try
         capture=length(job)==5 ? job[5] : nothing
-        put!(s.jobs,(job[1:4]...,foreground,processing_pid,capture))
+        put!(s.jobs,(job[1:4]...,held,capture))
     catch
-        foreground && Threads.atomic_sub!(OCR_PENDING,1)
-        process_ocr_activity(processing_pid,-1)
+        hold!(held,-1)
         rethrow()
     end
 end
@@ -274,26 +295,13 @@ function review_queue!(s,e,img=nothing)
         # earlier page occupies the OCR worker. The worker awaits persistence
         # before processing, and close(s) drains both operations.
         input,source=img,e.source
-        retain_pixels=!(s.processor isa ReviewProcessor && s.processor.ocr isa ProcessOCR)
         img=Threads.@spawn begin
-            if retain_pixels
-                tmp=source*".tmp.png"
-                review_save_image(tmp,input); mv(tmp,source;force=true)
-            else
-                try
-                    Distributed.remotecall_fetch(worker_save_capture,s.processor.ocr.pid,source,input)
-                catch
-                    # A crashed processing process must not lose the captured
-                    # original. Persist locally, then report the worker error.
-                    tmp=source*".tmp.png"
-                    review_save_image(tmp,input);mv(tmp,source;force=true)
-                    rethrow()
-                end
-            end
+            tmp=source*".tmp.png"
+            review_save_image(tmp,input); mv(tmp,source;force=true)
             lock(s.lock) do
                 s.version+=1
             end
-            retain_pixels ? input : nothing
+            input
         end
     end
     capture===nothing || (capture.writer=img isa Task ? img : nothing)
@@ -462,15 +470,12 @@ function Base.close(s::ReviewSession)
         # must not retain four full-resolution capture buffers with it.
         close(s.capture_buffers)
         while isready(s.capture_buffers);take!(s.capture_buffers);end
-        if s.processor isa ReviewProcessor
-            close(s.processor.outputs)
-            while isready(s.processor.outputs);take!(s.processor.outputs);end
-        end
+        release_outputs(s.processor)
         owned=s.owns_ocr
         s.owns_ocr=false
         owned
     end
-    owned && applicable(close,s.processor.ocr) && close(s.processor.ocr)
+    owned && close(s.processor.ocr)
     nothing
 end
 
@@ -497,7 +502,7 @@ function review_commit!(s::ReviewSession,a::DocumentArchive)
             for e in group
                 e.side != :back && (sheet+=1)
                 if e.included
-                    img=permutedims(load(e.output))
+                    img=review_load_image(e.output)
                     push!(pages,PDFPage(img,e.words;dpi=s.dpi)); push!(textparts,text(e.words))
                 end
                 push!(sides,Dict("source"=>e.source,"sheet"=>sheet,"side"=>(e.side==:single ? "unknown" : String(e.side)),

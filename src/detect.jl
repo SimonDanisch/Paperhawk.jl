@@ -213,18 +213,40 @@ end
         k == 1 && (counter[1] = Int32(0))
     end
 end
+# Union-find on the device: the root of `k`, read atomically, and a join that
+# hooks the larger root under the smaller, retrying when another thread got
+# there first.
+@inline function detect_find(parents, k::Int32)
+    p = KA.@atomic :monotonic parents[k]
+    while p != k
+        k = p; p = KA.@atomic :monotonic parents[k]
+    end
+    return k
+end
+
+@inline function detect_join!(parents, a::Int32, b::Int32)
+    while true
+        a = detect_find(parents, a); b = detect_find(parents, b)
+        a == b && break
+        hi = max(a, b); lo = min(a, b)
+        result = KA.@atomicreplace :monotonic parents[hi] hi => lo
+        result.success && break
+    end
+    return nothing
+end
+
 @kernel function detect_cc_merge!(parents, @Const(mask), w::Int)
     k = @index(Global)
     x = mod(k - 1, w) + 1; y = (k - 1) ÷ w + 1
     if @inbounds mask[k] == Int32(1)
         if x > 1 && (@inbounds mask[k - 1] == Int32(1))
-            page_cc_join!(parents, Int32(k), Int32(k - 1))
+            detect_join!(parents, Int32(k), Int32(k - 1))
         end
         if y > 1
             for dx in -1:1
                 j = k - w + dx
                 if 1 <= x + dx <= w && (@inbounds mask[j] == Int32(1))
-                    page_cc_join!(parents, Int32(k), Int32(j))
+                    detect_join!(parents, Int32(k), Int32(j))
                 end
             end
         end
@@ -373,7 +395,7 @@ end
 # ── Host side ────────────────────────────────────────────────────────────────
 
 """
-    PageDetector(; select = info -> true, detect_size = 800, thumbnail_size = (48, 68),
+    PageDetector(; select = anygpu, detect_size = 800, thumbnail_size = (48, 68),
         thumbnail_samples = 6, samples = 64, min_area = 0.02, max_area = 0.98,
         min_rectangularity = 0.75, min_contrast = 0.15, min_drop = 0.05,
         max_spread = 4, border = 2, candidates = 5, opening = 2, coarse_search = 32)
@@ -414,7 +436,7 @@ mutable struct PageDetector{D}
     plans::Dict{Any, Any}
 end
 
-function PageDetector(; select = info -> true, detect_size::Int = 800, thumbnail_size::NTuple{2, Int} = (48, 68),
+function PageDetector(; select = anygpu, detect_size::Int = 800, thumbnail_size::NTuple{2, Int} = (48, 68),
         thumbnail_samples::Int = 6, samples::Int = 64, min_area = 0.02, max_area = 0.98, min_rectangularity = 0.75,
         min_contrast = 0.15f0, min_drop = 0.05f0, max_spread = 4, border::Int = 2, candidates::Int = 5, opening::Int = 2, coarse_search = 32)
     device = Mantle.Device(select)

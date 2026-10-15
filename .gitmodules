@@ -1,0 +1,40 @@
+[submodule "dev/CompilerCaching"]
+	path = dev/CompilerCaching
+	url = https://github.com/SimonDanisch/CompilerCaching.jl.git
+	branch = sd/published-invoke
+[submodule "dev/GPUArrays"]
+	path = dev/GPUArrays
+	url = https://github.com/JuliaGPU/GPUArrays.jl
+	branch = main
+[submodule "dev/KernelAbstractions"]
+	path = dev/KernelAbstractions
+	url = https://github.com/SimonDanisch/KernelAbstractions.jl
+	branch = sd/lava-refactor
+[submodule "dev/Lava"]
+	path = dev/Lava
+	url = https://github.com/SimonDanisch/Lava.jl
+	branch = sd/lava-refactor
+[submodule "dev/Mantle"]
+	path = dev/Mantle
+	url = https://github.com/SimonDanisch/Mantle.jl
+	branch = sd/lava-refactor
+[submodule "dev/Metal"]
+	path = dev/Metal
+	url = https://github.com/SimonDanisch/Metal.jl
+	branch = sd/lava-refactor
+[submodule "dev/Raycore"]
+	path = dev/Raycore
+	url = https://github.com/JuliaGeometry/Raycore.jl
+	branch = sd/with-texture
+[submodule "dev/Vulkan"]
+	path = dev/Vulkan
+	url = https://github.com/JuliaGPU/Vulkan.jl.git
+	branch = sd/vk1.4
+[submodule "dev/VulkanCore"]
+	path = dev/VulkanCore
+	url = https://github.com/JuliaGPU/VulkanCore.jl.git
+	branch = sd/vk1.4
+[submodule "dev/JuliaVision"]
+	path = dev/JuliaVision
+	url = https://github.com/SimonDanisch/JuliaVision
+	branch = sd/mantle-dev

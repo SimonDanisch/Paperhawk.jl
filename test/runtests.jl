@@ -144,9 +144,5 @@ end
     include("database.jl")
     include("review.jl")
     include("pipeline.jl")
-    try
-        include("processing.jl")
-    finally
-        Paperhawk.close_processing!()
-    end
+    include("gui.jl")
 end

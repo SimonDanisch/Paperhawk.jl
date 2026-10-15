@@ -33,21 +33,26 @@
 end
 
 @testset "preview cache reuses pixels without changing delivered tiles" begin
-    mktempdir() do dir
-        tiles=Any[];identities=Set{UInt}()
-        for k in 1:12
-            path=joinpath(dir,"$k.png")
-            image=fill(RGB{N0f8}(k/20,0.2,0.3),64,96)
-            Paperhawk.review_save_image(path,image)
-            tile=Paperhawk.worker_preview(path,32,nothing)
-            push!(tiles,tile)
-            Paperhawk.with_preview_pixels(path) do pixels
-                push!(identities,objectid(pixels))
+    previews=Paperhawk.Previews()
+    try
+        mktempdir() do dir
+            tiles=Any[];identities=Set{UInt}()
+            for k in 1:12
+                path=joinpath(dir,"$k.png")
+                image=fill(RGB{N0f8}(k/20,0.2,0.3),64,96)
+                Paperhawk.review_save_image(path,image)
+                push!(tiles,Paperhawk.tile(previews,path,32))
+                Paperhawk.pixels(previews,path) do pixels
+                    push!(identities,objectid(pixels))
+                end
+            end
+            # Four decoded pages are kept, their buffers reused for the next.
+            @test length(identities)==4
+            for k in 1:12
+                @test all(==(RGB{N0f8}(k/20,0.2,0.3)),tiles[k].pixels)
             end
         end
-        @test length(identities)==4
-        for k in 1:12
-            @test all(==(RGB{N0f8}(k/20,0.2,0.3)),tiles[k].pixels)
-        end
+    finally
+        close(previews)
     end
 end

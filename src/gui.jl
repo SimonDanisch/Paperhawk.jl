@@ -1,8 +1,11 @@
-module PaperhawkMakieExt
-using Paperhawk, GLMakie
+# The scanner window: live view, the draft's pages, and the review controls,
+# as a native GLMakie window. A module of its own, so Makie's many exported
+# names do not meet Paperhawk's.
+module GUI
+using ..Paperhawk, GLMakie
 using GLMakie.Makie: Button, Textbox, Menu, Label
-using Paperhawk: RGB, N0f8, Vec2f, Word
-const A=Paperhawk
+using ..Paperhawk: RGB, N0f8, Vec2f, Word
+import ..Paperhawk as A
 const BG=RGB{Float32}(0.95,0.96,0.98)
 const INK=RGB{Float32}(0.10,0.16,0.25)
 const GREEN=RGB{Float32}(0.10,0.48,0.32)
@@ -13,12 +16,14 @@ const ACCENT=RGB{Float32}(0.12,0.36,0.51)
 const CANVAS=RGB{Float32}(0.84,0.88,0.91)
 const EMPTY=fill(RGB{N0f8}(0.90,0.92,0.94),480,640)
 setchanged!(observable,value)=(observable[]==value || (observable[]=value);nothing)
-load_preview(path,width,area)=A.worker_preview(path,width,area)
 
 mutable struct ScannerUI
     figure::Figure
     draft::ReviewSession
     archive::Union{Nothing,DocumentArchive}
+    ocr::Union{Nothing,PaddleOCR}
+    previews::A.Previews
+    select::Any
     selected::Observable{Int}
     message::Observable{String}
     timer::Union{Nothing,Timer}
@@ -35,14 +40,11 @@ mutable struct ScannerUI
     closed::Bool
 end
 
-# Active automatic capture reserves responsiveness for scanning. LLM work
-# resumes when capture is paused and the queued OCR has drained.
+# Active automatic capture is foreground demand on the OCR engine: LLM work
+# on its device resumes when capture is paused and the queued OCR has drained.
 function pause!(ui,value::Bool)
     previous=Threads.atomic_xchg!(ui.paused,value)
-    if previous!=value
-        value ? Threads.atomic_sub!(A.SCAN_ACTIVE,1) : Threads.atomic_add!(A.SCAN_ACTIVE,1)
-        A.process_scan_activity(value ? -1 : 1)
-    end
+    previous==value || A.hold!(ui.ocr,value ? -1 : 1)
     value
 end
 
@@ -66,14 +68,14 @@ function connect!(ui,cam)
     ui.camera === nothing || throw(ArgumentError("Kamera ist bereits verbunden"))
     ui.camera=cam; ui.running[]=true; pause!(ui,true)
     ui.task=errormonitor(A.spawn_gpu_owner("live view") do
-        detector=A.PageDetector()
+        detector=A.PageDetector(;select=ui.select)
         trigger=Trigger(hold=0.3)
-        capture_buffer=cam isa PhoneCamera ? Matrix{A.RGB{A.N0f8}}(undef,cam.width,cam.height) : nothing
+        img=Matrix{A.RGB{A.N0f8}}(undef,size(cam))
         try
             while ui.running[]
                 # Loading the OCR models and compiling GPU kernels at startup can
                 # stall the stream for several seconds; a dead decoder still fails at once.
-                img=capture_buffer===nothing ? frame(cam;timeout=30) : frame!(capture_buffer,cam;timeout=30)
+                frame!(img,cam;timeout=30)
                 detection=A.detect!(detector,img)
                 page=detection.page
                 lock(ui.capture_lock) do
@@ -132,25 +134,32 @@ function Base.close(ui::ScannerUI)
     ui.camera===nothing || close(ui.camera)
     ui.task===nothing || wait(ui.task)
     close(ui.draft)
+    close(ui.previews)
     screen=GLMakie.Makie.getscreen(ui.figure.scene)
     screen===nothing || close(screen)
     nothing
 end
 
 """
-    scanner_gui(; camera=nothing, archive=nothing, dir=..., duplex=true, ocr=nothing)
+    scanner_gui(; camera=nothing, archive=nothing, dir=..., duplex=true, ocr=nothing, dewarp=false,
+                select=Paperhawk.anygpu, camera_torch=false)
 
 Return a controller; show `ui.figure`. The camera starts paused. Captures are
-editable drafts until the explicit archive button. `close(ui)` releases camera
-and draft resources. GLMakie renders the figure in a native desktop window.
+editable drafts until the explicit archive button. `close(ui)` releases camera,
+draft and preview resources. GLMakie renders the figure in a native desktop
+window. `select` names the GPU for the live view and the previews; the OCR
+engine has its own.
 """
-function A.scanner_gui(;camera=nothing,archive=nothing,dir=joinpath("scans","review_"*A.Dates.format(A.Dates.now(),"yyyymmdd_HHMMSS")),
-        duplex=true,dpi=300,ocr=nothing,dewarper=nothing,draft=nothing,image_loader=load_preview,window_size=(1600,1000),camera_torch=false)
-    draft===nothing && (draft=ReviewSession(dir;duplex,dpi,ocr,dewarper))
+function A.scanner_gui(;camera=nothing,archive=nothing,dir=A.data_dir("scans","review_"*A.Dates.format(A.Dates.now(),"yyyymmdd_HHMMSS")),
+        duplex=true,dpi=300,ocr=nothing,dewarp=false,draft=nothing,image_loader=nothing,window_size=(1600,1000),
+        camera_torch=false,select=A.anygpu)
+    draft===nothing && (draft=ReviewSession(dir;duplex,dpi,ocr,dewarp))
+    previews=A.Previews(;select)
+    image_loader===nothing && (image_loader=(path,width,area)->A.tile(previews,path,width,area))
     fig=Figure(size=window_size,backgroundcolor=BG,fontsize=15,figure_padding=16)
     selected=Observable(isempty(draft.entries) ? 0 : last(draft.entries).id)
     message=Observable("Blatt auflegen → erfassen → prüfen. Die Nummern entstehen beim Archivieren.")
-    ui=ScannerUI(fig,draft,archive,selected,message,nothing,nothing,nothing,Threads.Atomic{Bool}(false),
+    ui=ScannerUI(fig,draft,archive,A.engine(draft.processor),previews,select,selected,message,nothing,nothing,nothing,Threads.Atomic{Bool}(false),
         Threads.Atomic{Bool}(true),Channel{Any}(Inf),nothing,ReentrantLock(),ReentrantLock(),Threads.Atomic{Int}(0),Dict{Symbol,Any}(),false)
     header=GridLayout(fig[1,1:3];tellheight=false,width=Relative(1),height=Relative(1))
     Label(header[1,1],"Paperhawk",fontsize=26,font=:bold,color=INK,halign=:left)
@@ -488,15 +497,12 @@ function A.scanner_gui(;camera=nothing,archive=nothing,dir=joinpath("scans","rev
             end
             setchanged!(pausebutton.label,ui.paused[] ? "Automatik starten" : "Pause")
             setchanged!(ui.buttons[:crop].label,cropmode[] ? "Abbrechen" : "Zuschneiden")
-            if archive!==nothing && time()-archive_refresh[]>1 && trylock(archive.lock)
-                try
-                    rows=A.DBInterface.execute(archive.db,"SELECT count(*) AS n FROM documents WHERE status='pending'")
-                    pending=try only([Int(r.n) for r in rows]) finally A.DBInterface.close!(rows) end
+            if archive!==nothing && time()-archive_refresh[]>1
+                pending=A.pending_classifications(archive)
+                if pending!==nothing
                     archivehint.text[]=archive.classifier===nothing ? "Archiv · Volltextsuche bereit" :
                         pending==0 ? "Archiv · Zusammenfassungen fertig" : "$pending Zusammenfassungen im Hintergrund"
                     archive_refresh[]=time()
-                finally
-                    unlock(archive.lock)
                 end
             end
             lock(draft.lock) do
@@ -604,5 +610,36 @@ function A.scanner_gui(;camera=nothing,archive=nothing,dir=joinpath("scans","rev
     end
     camera===nothing || connect!(ui,camera)
     return ui
+end
+
+"""
+    scanner(; select = anygpu, camera_torch = true, duplex = true, classify = false,
+            dir = <new draft>, archive = data_dir("archiv"))
+
+Open the scanner in a maximised window and return when it is closed. The OCR
+engine, the archive in `archive` and, with `classify`, the local LLM that
+summarises its documents run on the GPU `select` names (see `Mantle.Device`),
+as do the live view and the previews. `dir` reopens an existing draft.
+"""
+function A.scanner(; select = A.anygpu, camera_torch::Bool = true, duplex::Bool = true, classify::Bool = false,
+        dir = nothing, archive::AbstractString = A.data_dir("archiv"))
+    ocr = PaddleOCR(; select)
+    classifier = documents = ui = nothing
+    try
+        classify && (classifier = BonsaiClassifier(ocr))
+        documents = DocumentArchive(archive; classifier)
+        options = dir === nothing ? (;) : (; dir)
+        ui = A.scanner_gui(; archive = documents, ocr, duplex, camera_torch, select, options...)
+        screen = display(GLMakie.Screen(; title = "Paperhawk"), ui.figure)
+        GLMakie.GLFW.MaximizeWindow(screen.glscreen)
+        wait(screen)
+    finally
+        # The classifier shares the OCR engine's device: it goes first.
+        ui === nothing || close(ui)
+        documents === nothing || close(documents)
+        classifier === nothing || close(classifier)
+        close(ocr)
+    end
+    return nothing
 end
 end

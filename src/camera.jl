@@ -10,14 +10,22 @@
 """
     Camera
 
-Where frames come from. A camera implements `frame(cam)`, the newest frame as
-an `img[x, y]` matrix of `RGB{N0f8}`, and `close(cam)`.
+Where frames come from. A camera implements `size(cam)`, the frame's size,
+`frame!(dest, cam; timeout)`, the next frame copied into `dest`, an `img[x, y]`
+matrix of `RGB{N0f8}`, and `close(cam)`.
 """
 abstract type Camera end
 
 """
+    frame(cam) -> Matrix{RGB{N0f8}}
+
+The next frame, `img[x, y]`, in a new matrix.
+"""
+frame(cam::Camera; kw...) = frame!(Matrix{RGB{N0f8}}(undef, size(cam)), cam; kw...)
+
+"""
     PhoneCamera(; camera_id = 0, size = (4624, 3472), fps = 10, torch = false,
-                bitrate = 40_000_000, server = <tools/scrcpy-server>, version = "4.1")
+                bitrate = 40_000_000, server = <assets/scrcpy-server>, version = "4.1")
 
 The back camera of the phone connected over adb, streamed at `size`, which
 must be one of the sizes `scrcpy --list-camera-sizes` prints. At 4624x3472 an
@@ -43,7 +51,7 @@ mutable struct PhoneCamera <: Camera
     tasks::Vector{Task}
 end
 
-default_server() = joinpath(dirname(@__DIR__), "tools", "scrcpy-server")
+default_server() = joinpath(dirname(@__DIR__), "assets", "scrcpy-server")
 
 function PhoneCamera(; camera_id::Int = 0, size::NTuple{2, Int} = (4624, 3472), fps::Int = 10, torch::Bool = false, bitrate::Int = 40_000_000, server::String = default_server(), version::String = "4.1", connect_timeout = 10.0)
     remote = "/data/local/tmp/paperhawk-server.jar"
@@ -150,12 +158,7 @@ function frame!(dest::Matrix{RGB{N0f8}}, cam::PhoneCamera; timeout = 5.0)
     return dest
 end
 
-"""
-    frame(cam) -> Matrix{RGB{N0f8}}
-
-The next frame, `img[x, y]`.
-"""
-frame(cam::PhoneCamera; kw...) = frame!(Matrix{RGB{N0f8}}(undef, cam.width, cam.height), cam; kw...)
+Base.size(cam::PhoneCamera) = (cam.width, cam.height)
 
 function Base.close(cam::PhoneCamera)
     close(cam.socket)

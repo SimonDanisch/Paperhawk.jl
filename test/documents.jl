@@ -1,11 +1,14 @@
-# From a flat page to a searchable PDF: cleaning, OCR, the text layer, QR
-# codes, and how captures become documents. Pages are rendered from PDFs
-# with Poppler, so the OCR has real type to read, and Poppler is also the PDF
-# reader whose text extraction the text layer has to satisfy.
+# From a flat page to a searchable PDF: cleaning, OCR and the text layer.
+# Pages are rendered from PDFs with Poppler, so the OCR has real type to read,
+# and Poppler is also the PDF reader whose text extraction the text layer has
+# to satisfy.
 
 using Poppler_jll
-using Paperhawk: Word, PDFPage, write_pdf, paper_size, qr_image, qr_codes, SEPARATOR_TEXT,
-    Capture, documents, homography, project
+using Paperhawk: Word, PDFPage, write_pdf, paper_size, homography, project
+
+# A processed page as a PDF page and its text.
+pdfpage(r; dpi = 300) = PDFPage(r.image, r.words; dpi)
+pagetext(r) = Paperhawk.text(r.words)
 
 const LETTER = """
 Sehr geehrte Damen und Herren,
@@ -60,22 +63,6 @@ end
     letter = letter_page()
     truth = split(LETTER)
 
-    @testset "QR codes made here, read by zbar" begin
-        for text in (SEPARATOR_TEXT, "a", "https://example.com/x?y=1", "x"^42)
-            img = map(c -> RGB{N0f8}(gray(c), gray(c), gray(c)), qr_image(text; module_size = 6))
-            @test qr_codes(img; width = 10_000) == [text]
-        end
-        @test_throws ArgumentError qr_image("x"^43)
-    end
-
-    @testset "separator sheet" begin
-        path = separator_sheet(tempname() * ".pdf")
-        sheet = render(path; dpi = 150)
-        @test isseparator(sheet)
-        @test !isseparator(letter)
-        @test "Trennblatt" in pdf_text(path)
-    end
-
     # Pages are warped, cleaned and read on the GPU only.
     ocr = PaddleOCR()
 
@@ -88,45 +75,48 @@ end
         end
         @test failure isa CapturedException
         @test failure.ex isa ErrorException && failure.ex.msg=="priority cleanup test"
-        @test Paperhawk.OCR_PENDING[]==0
+        @test ocr.demand[]==0
     end
 
     @testset "a letter, read and written to a searchable PDF" begin
-        page = process_page(letter; ocr)
-        found = split(page.text)
+        page = process_page(ocr, letter)
+        found = split(pagetext(page))
         accuracy = count(in(Set(found)), truth) / length(truth)
         @info "PP-OCRv6 word accuracy" accuracy
         @test accuracy >= 0.98
         @test page.rotation == 0
         @test !page.blank
-        pdf = write_pdf(tempname() * ".pdf", [page.page])
+        pdf = write_pdf(tempname() * ".pdf", [pdfpage(page)])
         @test pdf_text(pdf) == found
         # Word boxes lie inside their line, left to right.
-        @test all(w -> w.width > 0 && w.x >= 0, page.page.words)
-        # The scanner reads pages in tasks on other threads, and only the
-        # thread that made the GPU's submit channel may use it: the worker
-        # has to carry the request over. Two at once, as a fast stack does.
-        tasks = [Threads.@spawn process_page(letter; ocr) for _ in 1:2]
-        @test all(t -> fetch(t).text == page.text, tasks)
+        @test all(w -> w.width > 0 && w.x >= 0, page.words)
+        # Pages are read in tasks on other threads, and only the thread that
+        # made the GPU's device may submit to it: the engine's worker carries
+        # the request over. Two at once, as a fast stack does.
+        tasks = [Threads.@spawn process_page(ocr, letter) for _ in 1:2]
+        @test all(t -> pagetext(fetch(t)) == pagetext(page), tasks)
+        # The words of the page as it is, without the cleanup.
+        @test count(in(Set(w.text for w in read_words(ocr, letter))), truth) / length(truth) >= 0.98
     end
 
     @testset "upside down and sideways pages are turned upright" begin
         for degrees in (90, 180, 270)
             # PP-LCNet's page classifier on its own, and the whole page.
-            @test mod(orientation(ocr, turn(letter, degrees)) + degrees, 360) == 0
-            page = process_page(turn(letter, degrees); ocr)
+            @test mod(Paperhawk.orientation(ocr, turn(letter, degrees)) + degrees, 360) == 0
+            page = process_page(ocr, turn(letter, degrees))
             @test mod(page.rotation + degrees, 360) == 0
-            @test count(in(Set(split(page.text))), truth) / length(truth) >= 0.95
+            @test size(page.image) == size(letter)
+            @test count(in(Set(split(pagetext(page)))), truth) / length(truth) >= 0.95
         end
     end
 
     @testset "blank pages" begin
-        @test process_page(fill(RGB{N0f8}(0.93, 0.92, 0.9), size(letter)); ocr).blank
-        @test !process_page(letter; ocr).blank
+        @test process_page(ocr, fill(RGB{N0f8}(0.93, 0.92, 0.9), size(letter))).blank
+        @test !process_page(ocr, letter).blank
     end
 
     @testset "output modes" begin
-        image(mode) = last(Paperhawk.process_page_image(letter; ocr, mode))
+        image(mode) = process_page(ocr, letter; mode).image
         @test eltype(image(:color)) == RGB{N0f8}
         grey = image(:gray)
         @test eltype(grey) == Gray{N0f8} && size(grey) == size(letter)
@@ -150,41 +140,20 @@ end
                  end for x in 1:3900, y in 1:3600]
         found = findsheet(frame)
         @test found !== nothing
-        page = process_page(frame; ocr, corners = found.corners)
-        @test count(in(Set(split(page.text))), truth) / length(truth) >= 0.95
-        @test (page.page.width, page.page.height) == paper_size(:a4)
+        page = process_page(ocr, frame; corners = found.corners)
+        @test count(in(Set(split(pagetext(page)))), truth) / length(truth) >= 0.95
+        @test size(page.image) == paper_size(:a4)
     end
 
-    if Paperhawk.ongpu(_->Paperhawk.UVDocRunner.ready(),ocr)
-        @testset "UVDoc before OCR and searchable PDF" begin
-            dewarper = uvdoc(ocr)
-            try
-                corrected = fetch(Threads.@spawn process_page(letter; ocr, dewarper))
-                @test !corrected.blank
-                @test count(in(Set(split(corrected.text))), truth) / length(truth) >= 0.95
-                pdf = write_pdf(tempname() * ".pdf", [corrected.page])
-                @test pdf_text(pdf) == split(corrected.text)
-                @test all(w -> w.width > 0 && w.x >= 0, corrected.page.words)
-                @test process_page(fill(RGB{N0f8}(0.93, 0.92, 0.9), size(letter)); ocr, dewarper).blank
-                rm(pdf)
-            finally
-                close(dewarper)
-            end
-        end
+    @testset "UVDoc before OCR and searchable PDF" begin
+        corrected = fetch(Threads.@spawn process_page(ocr, letter; dewarp = true))
+        @test !corrected.blank
+        @test count(in(Set(split(pagetext(corrected)))), truth) / length(truth) >= 0.95
+        pdf = write_pdf(tempname() * ".pdf", [pdfpage(corrected)])
+        @test pdf_text(pdf) == split(pagetext(corrected))
+        @test all(w -> w.width > 0 && w.x >= 0, corrected.words)
+        @test process_page(ocr, fill(RGB{N0f8}(0.93, 0.92, 0.9), size(letter)); dewarp = true).blank
+        rm(pdf)
     end
     close(ocr)
-
-    @testset "captures become documents" begin
-        side(name, separator = false) = Capture(name, separator, nothing)
-        names(docs) = [[c.raw for c in d] for d in docs]
-        # One-sided: separators split, and are left out.
-        simplex = [side("a1"), side("a2"), side("sep", true), side("b1"), side("sep", true)]
-        @test names(documents(simplex)) == [["a1", "a2"], ["b1"]]
-        # Duplex: fronts a, b, separator, c; then the backs, last sheet first.
-        duplex = [side("a"), side("b"), side("sep", true), side("c"), side("c'"), side("sep'"), side("b'"), side("a'")]
-        @test names(documents(duplex; duplex = true)) == [["a", "a'", "b", "b'"], ["c", "c'"]]
-        # An odd number of sides cannot be duplex: kept as scanned.
-        odd = @test_logs (:warn,) documents(duplex[1:7]; duplex = true)
-        @test names(odd) == [["a", "b"], ["c", "c'", "sep'", "b'"]]
-    end
 end
