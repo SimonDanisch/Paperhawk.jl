@@ -34,8 +34,9 @@ import FileWatching.Pidfile
 using ImageCore
 using PNGFiles, JpegTurbo, CodecZlib
 using FFMPEG_jll
-using GeometryBasics: Vec, Vec2f, Vec3, Mat
+using GeometryBasics: Vec, Vec2f, Vec3, Mat, Mat3f
 import Mantle, PPOCRRunner, UVDocRunner, BonsaiRunner
+import GPUFiltering as GF
 import KernelAbstractions as KA
 using KernelAbstractions: @kernel, @index, @Const
 

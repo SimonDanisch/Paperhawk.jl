@@ -2,7 +2,7 @@
 
 julia_version = "1.12.7"
 manifest_format = "2.0"
-project_hash = "9e87d73b89c8e114706097250dc552a35334e079"
+project_hash = "7fd0076a4718c6821f97acf505627972f2e31fea"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -594,6 +594,16 @@ version = "2.13.2"
     NVPTX_LLVM_Backend_jll = "ef6e0fe3-e6ef-59c0-bde6-4989574699e0"
     SPIRV_LLVM_Backend_jll = "4376b9bf-cff8-51b6-bb48-39421dff0d0c"
     SPIRV_LLVM_Translator_jll = "4a5d46fc-d8cf-5151-a261-86b458210efb"
+
+[[deps.GPUFiltering]]
+deps = ["ColorTypes", "FixedPointNumbers", "GeometryBasics", "KernelAbstractions", "Statistics"]
+path = "dev/JuliaVision/GPUFiltering"
+uuid = "0d8d4a14-6fb1-4aec-8b08-0f10adea08ad"
+version = "0.1.0"
+weakdeps = ["Mantle"]
+
+    [deps.GPUFiltering.extensions]
+    GPUFilteringMantleExt = "Mantle"
 
 [[deps.GPUToolbox]]
 git-tree-sha1 = "ac858e66e7bee15ccc5931967260db8fe051e2a6"
@@ -1297,7 +1307,7 @@ uuid = "f57f5aa1-a3ce-4bc8-8ab9-96f992907883"
 version = "0.4.5"
 
 [[deps.PPOCRRunner]]
-deps = ["ColorTypes", "DNNKernels", "JSON3", "KernelAbstractions", "KernelInterface", "Lava", "LazyArtifacts", "Mantle", "Vulkan", "VulkanCore"]
+deps = ["ColorTypes", "DNNKernels", "GPUFiltering", "GeometryBasics", "JSON3", "KernelAbstractions", "KernelInterface", "Lava", "LazyArtifacts", "Mantle", "Vulkan", "VulkanCore"]
 path = "dev/JuliaVision/PPOCRRunner"
 uuid = "e16c7811-b8c1-4791-91d8-75b683fe5914"
 version = "0.1.0"
@@ -1321,7 +1331,7 @@ uuid = "36c8627f-9965-5494-a995-c6b170f724f3"
 version = "1.58.2+0"
 
 [[deps.Paperhawk]]
-deps = ["BonsaiRunner", "CodecZlib", "DBInterface", "Dates", "FFMPEG_jll", "FileWatching", "GLMakie", "GeometryBasics", "ImageCore", "JSON3", "JpegTurbo", "KernelAbstractions", "LinearAlgebra", "Mantle", "PNGFiles", "PPOCRRunner", "SHA", "SQLite", "Sockets", "TOML", "UVDocRunner"]
+deps = ["BonsaiRunner", "CodecZlib", "DBInterface", "Dates", "FFMPEG_jll", "FileWatching", "GLMakie", "GPUFiltering", "GeometryBasics", "ImageCore", "JSON3", "JpegTurbo", "KernelAbstractions", "LinearAlgebra", "Mantle", "PNGFiles", "PPOCRRunner", "SHA", "SQLite", "Sockets", "TOML", "UVDocRunner"]
 path = "."
 uuid = "93e2e269-07d8-4757-8cb6-33d91e81e191"
 version = "0.1.0"
@@ -1823,7 +1833,7 @@ uuid = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 version = "1.11.0"
 
 [[deps.UVDocRunner]]
-deps = ["Artifacts", "ColorTypes", "DNNKernels", "KernelAbstractions", "KernelInterface", "Lava", "LazyArtifacts", "Mantle", "Vulkan", "VulkanCore"]
+deps = ["Artifacts", "ColorTypes", "DNNKernels", "GPUFiltering", "GeometryBasics", "KernelInterface", "Lava", "LazyArtifacts", "Mantle", "Vulkan", "VulkanCore"]
 path = "dev/JuliaVision/UVDocRunner"
 uuid = "7c6dc493-cef7-40e2-b25f-97e481222d57"
 version = "0.1.0"

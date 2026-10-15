@@ -144,3 +144,68 @@ function Base.close(w::GPUWorker)
 end
 
 Base.show(io::IO, w::GPUWorker) = print(io, "GPUWorker(", repr(w.name), isopen(w.requests) ? "" : ", closed", ")")
+
+"""
+    DeviceArrays(device)
+
+Named device arrays on one Mantle device and the plans recorded over them,
+made on first use and freed by `empty!`. A graph tells the memory its passes
+touch apart by the array object: two views of one buffer would be two
+resources with no barrier between them. So every pass names an array by the
+one object [`array!`](@ref) keeps.
+"""
+struct DeviceArrays{D}
+    device::D
+    buffers::Dict{Any, Any}
+    arrays::Dict{Any, Any}
+    plans::Dict{Any, Any}
+end
+
+DeviceArrays(device) = DeviceArrays(device, Dict{Any, Any}(), Dict{Any, Any}(), Dict{Any, Any}())
+
+"""
+    array!(arrays, name, T, dims) -> device array
+
+The array `name`, made on first use and the same object while its shape stays. Its
+memory is one buffer per name, so `dims` may change between calls as long as
+the number of elements does not: a page and its turned self share one buffer.
+A graph names one shape of it.
+"""
+function array!(a::DeviceArrays, name, ::Type{T}, dims::Dims) where {T}
+    x = get(a.arrays, name, nothing)
+    x !== nothing && eltype(x) == T && size(x) == dims && return x
+    b = get!(() -> Mantle.Buffer(a.device, T, (prod(dims),)), a.buffers, name)
+    eltype(b) == T && length(b) == prod(dims) ||
+        throw(DimensionMismatch("array $(repr(name)) holds $(length(b)) $(eltype(b)), not $dims of $T"))
+    return a.arrays[name] = reshape(Mantle.storage(b), dims)
+end
+
+"""The array `name` as [`array!`](@ref) made it last."""
+Base.getindex(a::DeviceArrays, name) = a.arrays[name]
+
+"""
+    plan!(declare, arrays, key) -> Mantle.Plan
+
+The graph `declare(graph)` builds, recorded the first time under `key`.
+"""
+plan!(declare, a::DeviceArrays, key) = get!(a.plans, key) do
+    g = Mantle.Graph(a.device)
+    declare(g)
+    Mantle.record!(Mantle.Plan(g))
+end
+
+"""
+    run!(declare, arrays, key)
+
+The plan [`plan!`](@ref) records under `key`, run.
+"""
+run!(declare, a::DeviceArrays, key) = (Mantle.run!(plan!(declare, a, key)); nothing)
+
+"""Wait for the device, then free every plan and array."""
+function Base.empty!(a::DeviceArrays)
+    Mantle.waitidle(a.device)
+    foreach(Mantle.free!, values(a.plans)); empty!(a.plans)
+    empty!(a.arrays)
+    foreach(Mantle.free!, values(a.buffers)); empty!(a.buffers)
+    return a
+end

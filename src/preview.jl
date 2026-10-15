@@ -1,5 +1,5 @@
-# Zoomed tiles of stored pages for the review UI, shrunk on the GPU with the
-# same kernel as the live view.
+# Zoomed tiles of stored pages for the review UI, shrunk on the GPU by the same
+# block mean as the live view.
 
 """
     PreviewRenderer(; select = anygpu)
@@ -8,20 +8,15 @@ A Mantle device of its own and the page last shown on it, uploaded once and
 shrunk into tiles as the view pans and zooms. Use it on one thread.
 """
 mutable struct PreviewRenderer{D}
-    device::D
     path::String
     dims::NTuple{2, Int}
-    buffers::Dict{Symbol, Any}
-    plans::Dict{Any, Any}
+    arrays::DeviceArrays{D}
 end
 
-PreviewRenderer(; select = anygpu) =
-    PreviewRenderer(Mantle.Device(select), "", (0, 0), Dict{Symbol, Any}(), Dict{Any, Any}())
+PreviewRenderer(; select = anygpu) = PreviewRenderer("", (0, 0), DeviceArrays(Mantle.Device(select)))
 
 function Base.close(r::PreviewRenderer)
-    Mantle.waitidle(r.device)
-    foreach(Mantle.free!, values(r.plans)); empty!(r.plans)
-    foreach(Mantle.free!, values(r.buffers)); empty!(r.buffers)
+    empty!(r.arrays)
     r.path, r.dims = "", (0, 0)
     return nothing
 end
@@ -33,31 +28,22 @@ end
 `scale`×`scale` blocks.
 """
 function render(r::PreviewRenderer, path::AbstractString, img::Matrix{RGB{N0f8}}, (x0, y0, x1, y1), scale::Int)
+    a = r.arrays
     if r.path != path || r.dims != size(img)
         size(img) == r.dims || close(r)
-        buffer(name, T) = get!(() -> Mantle.Buffer(r.device, T, size(img)), r.buffers, name)
-        input = buffer(:input, RGB{N0f8}); source = buffer(:source, RGB{Float32})
+        input = array!(a, :input, RGB{N0f8}, size(img)); source = array!(a, :source, RGB{Float32}, size(img))
         copyto!(input, img)
-        plan = get!(r.plans, :source) do
-            g = Mantle.Graph(r.device)
-            Mantle.dispatch!(g, page_copy!, (source, input), length(img); name = "page to float")
-            Mantle.record!(Mantle.Plan(g))
-        end
-        Mantle.run!(plan)
+        # Scattered reads of packed three-byte RGB{N0f8} faulted on RADV.
+        run!(g -> GF.convertpixels!(g, source, input), a, :source)
         r.path, r.dims = String(path), size(img)
     end
     w, h = max(1, (x1 - x0) ÷ scale), max(1, (y1 - y0) ÷ scale)
-    params = get!(() -> Mantle.Buffer(r.device, Int32, (3,)), r.buffers, :params)
-    copyto!(params, Int32[scale, x0, y0])
-    out = get!(() -> Mantle.Buffer(r.device, RGB{N0f8}, (w * h,)), r.buffers, Symbol(:tile_, w, :x, h))
-    plan = get!(r.plans, (:tile, w, h)) do
-        g = Mantle.Graph(r.device)
-        Mantle.dispatch!(g, shrink!, (out, r.buffers[:source], params, w), w * h; name = "preview tile")
-        Mantle.record!(Mantle.Plan(g))
-    end
-    Mantle.run!(plan)
+    blocks = array!(a, :blocks, GF.Blocks, (1,))
+    copyto!(blocks, [GF.Blocks(scale, (x0, y0))])
+    out = array!(a, (:tile, w, h), RGB{N0f8}, (w, h))
+    run!(g -> GF.areadownscale!(g, out, a[:source], blocks), a, (:tile, w, h))
     pixels = Matrix{RGB{N0f8}}(undef, w, h)
-    copyto!(vec(pixels), out)
+    copyto!(pixels, out)
     return pixels
 end
 

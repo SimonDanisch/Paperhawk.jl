@@ -39,10 +39,6 @@ struct Page
     edge_rms::Float32
 end
 
-luminance(c::Real) = Float32(c)
-luminance(c::Gray) = Float32(gray(c))
-luminance(c::AbstractRGB) = 0.299f0 * Float32(red(c)) + 0.587f0 * Float32(green(c)) + 0.114f0 * Float32(blue(c))
-
 """
     whiteness(c) -> Float32
 
@@ -56,31 +52,6 @@ function whiteness(c::AbstractRGB)
     clamp(lo - 2 * (hi - lo), 0f0, 1f0)
 end
 whiteness(c::Real) = Float32(c)
-
-"""
-    sample(img, x, y)
-
-`img[x, y]` at a point between pixels, interpolated bilinearly; points outside
-are clamped to the border.
-"""
-@inline function sample(img::AbstractMatrix, x::Real, y::Real)
-    w, h = size(img)
-    x = clamp(Float32(x), 1.0f0, Float32(w))
-    y = clamp(Float32(y), 1.0f0, Float32(h))
-    x0 = min(unsafe_trunc(Int, x), w)
-    y0 = min(unsafe_trunc(Int, y), h)
-    x1, y1 = min(x0 + 1, w), min(y0 + 1, h)
-    fx, fy = x - x0, y - y0
-    @inbounds begin
-        a, b = float32(img[x0, y0]), float32(img[x1, y0])
-        c, d = float32(img[x0, y1]), float32(img[x1, y1])
-    end
-    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
-end
-
-float32(c::Real) = Float32(c)
-float32(c::Gray) = Float32(gray(c))
-float32(c::AbstractRGB) = RGB{Float32}(c)
 
 cross2(a, b) = a[1] * b[2] - a[2] * b[1]
 cross2(o, a, b) = cross2(a - o, b - o)
@@ -105,107 +76,28 @@ function intersect_lines((c1, d1), (c2, d2))
     return c1 + t * d1
 end
 
-pack_n0f8(v::Float32) = reinterpret(N0f8, unsafe_trunc(UInt8, round(clamp(v, 0f0, 1f0) * 255f0)))
-
 # ── Kernels ──────────────────────────────────────────────────────────────────
 
-"""
-    shrink!(out, src, params, w)
-
-`src` averaged over f×f blocks into `out` (`w` wide), starting at pixel
-`(x0, y0) + 1`: `params` holds `(f, x0, y0)`. The live view's preview, the
-detector's input and the review's zoomed tiles all come from here.
-"""
-@kernel function shrink!(out, @Const(src), @Const(params), w::Int)
-    i = @index(Global)
-    @inbounds f = Int(params[1]); x0 = Int(params[2]); y0 = Int(params[3])
-    x = mod(i - 1, w) + 1; y = (i - 1) ÷ w + 1
-    r = 0f0; g = 0f0; b = 0f0
-    for yy in (y0 + (y - 1) * f + 1):(y0 + y * f), xx in (x0 + (x - 1) * f + 1):(x0 + x * f)
-        @inbounds c = src[xx, yy]
-        r += red(c); g += green(c); b += blue(c)
-    end
-    n = Float32(f * f)
-    @inbounds out[i] = RGB{N0f8}(pack_n0f8(r / n), pack_n0f8(g / n), pack_n0f8(b / n))
-end
-
-# Luminance for the trigger's thumbnail, whiteness for finding the sheet.
+# Luma for the trigger's thumbnail, whiteness for finding the sheet.
 @kernel function detect_features!(lum, white, @Const(rgb))
     i = @index(Global)
     @inbounds c = RGB{Float32}(rgb[i])
     @inbounds begin
-        lum[i] = luminance(c)
+        lum[i] = GF.luma(c)
         white[i] = whiteness(c)
     end
 end
 
-const DETECT_HIST_GROUPS = 64
-@kernel function detect_hist_clear!(hist)
+# Paper where the whiteness reaches Otsu's threshold; nowhere when the two
+# classes Otsu separated are too alike for one of them to be a sheet.
+@kernel function detect_mask!(mask, @Const(white), @Const(otsu), min_contrast::Float32)
     i = @index(Global)
-    @inbounds hist[i] = Int32(0)
-end
-# Spread over groups so the atomics of neighbouring pixels rarely collide.
-@kernel function detect_hist!(hist, @Const(white))
-    i = @index(Global)
-    @inbounds bin = clamp(unsafe_trunc(Int, white[i] * 256f0) + 1, 1, 256)
-    KA.@atomic hist[bin, mod(i - 1, DETECT_HIST_GROUPS) + 1] += Int32(1)
+    @inbounds mask[i] = otsu[2] >= min_contrast && white[i] >= otsu[1] ? Int32(1) : Int32(0)
 end
 
-# Otsu's threshold, in one thread over 256 bins. Too little contrast between
-# the two classes means there is no sheet: the threshold is then above 1.
-@kernel function detect_otsu!(threshold, @Const(hist), min_contrast::Float32)
-    i = @index(Global)
-    total = 0f0; sum_all = 0f0
-    for bin in 1:256
-        c = 0f0
-        for g in 1:DETECT_HIST_GROUPS
-            @inbounds c += hist[bin, g]
-        end
-        total += c; sum_all += c * (bin - 0.5f0) / 256f0
-    end
-    wb = 0f0; sb = 0f0; best = -1f0; thr = 2f0; mb = 0f0; mf = 0f0
-    for bin in 1:255
-        c = 0f0
-        for g in 1:DETECT_HIST_GROUPS
-            @inbounds c += hist[bin, g]
-        end
-        wb += c; sb += c * (bin - 0.5f0) / 256f0
-        wf = total - wb
-        if wb > 0f0 && wf > 0f0
-            between = wb * wf * (sb / wb - (sum_all - sb) / wf)^2
-            if between > best
-                best = between; thr = bin / 256f0; mb = sb / wb; mf = (sum_all - sb) / wf
-            end
-        end
-    end
-    @inbounds threshold[1] = mf - mb >= min_contrast ? thr : 2f0
-end
-
-@kernel function detect_mask!(mask, @Const(white), @Const(threshold))
-    i = @index(Global)
-    @inbounds mask[i] = white[i] >= threshold[1] ? Int32(1) : Int32(0)
-end
-
-# Opening with a (2r+1)² square: erode, then dilate. Outside the frame counts
-# as neither, so a region may touch the border.
-@kernel function detect_morph!(out, @Const(mask), w::Int, h::Int, r::Int, dilate::Bool)
-    i = @index(Global)
-    x = mod(i - 1, w) + 1; y = (i - 1) ÷ w + 1
-    v = dilate ? Int32(0) : Int32(1)
-    for dy in -r:r, dx in -r:r
-        xx = x + dx; yy = y + dy
-        if 1 <= xx <= w && 1 <= yy <= h
-            @inbounds m = mask[xx + (yy - 1) * w]
-            v = dilate ? max(v, m) : min(v, m)
-        end
-    end
-    @inbounds out[i] = v
-end
-
-@kernel function detect_cc_init!(parents, count, extreme, counter, @Const(mask))
+@kernel function detect_stats_clear!(count, extreme, counter)
     k = @index(Global)
     @inbounds begin
-        parents[k] = mask[k] == Int32(1) ? Int32(k) : Int32(0)
         count[k] = Int32(0)
         for d in 1:16
             extreme[d, k] = UInt32(0)
@@ -213,58 +105,14 @@ end
         k == 1 && (counter[1] = Int32(0))
     end
 end
-# Union-find on the device: the root of `k`, read atomically, and a join that
-# hooks the larger root under the smaller, retrying when another thread got
-# there first.
-@inline function detect_find(parents, k::Int32)
-    p = KA.@atomic :monotonic parents[k]
-    while p != k
-        k = p; p = KA.@atomic :monotonic parents[k]
-    end
-    return k
-end
-
-@inline function detect_join!(parents, a::Int32, b::Int32)
-    while true
-        a = detect_find(parents, a); b = detect_find(parents, b)
-        a == b && break
-        hi = max(a, b); lo = min(a, b)
-        result = KA.@atomicreplace :monotonic parents[hi] hi => lo
-        result.success && break
-    end
-    return nothing
-end
-
-@kernel function detect_cc_merge!(parents, @Const(mask), w::Int)
+# Size and the extreme pixel in 16 directions of every region, by the labels
+# of `GF.components!`. A key holds the projection on a direction
+# above the pixel's index, so one atomic maximum finds the pixel, ties going to
+# the later one.
+@kernel function detect_cc_stats!(count, extreme, @Const(labels), w::Int)
     k = @index(Global)
-    x = mod(k - 1, w) + 1; y = (k - 1) ÷ w + 1
-    if @inbounds mask[k] == Int32(1)
-        if x > 1 && (@inbounds mask[k - 1] == Int32(1))
-            detect_join!(parents, Int32(k), Int32(k - 1))
-        end
-        if y > 1
-            for dx in -1:1
-                j = k - w + dx
-                if 1 <= x + dx <= w && (@inbounds mask[j] == Int32(1))
-                    detect_join!(parents, Int32(k), Int32(j))
-                end
-            end
-        end
-    end
-end
-@inline function detect_root(parents, k::Int32)
-    while (@inbounds parents[k]) != k
-        @inbounds k = parents[k]
-    end
-    k
-end
-# Size and the extreme pixel in 16 directions of every region. A key holds the
-# projection on a direction above the pixel's index, so one atomic maximum
-# finds the pixel, ties going to the later one.
-@kernel function detect_cc_stats!(count, extreme, @Const(parents), w::Int)
-    k = @index(Global)
-    if @inbounds parents[k] != Int32(0)
-        root = detect_root(parents, Int32(k))
+    @inbounds root = labels[k]
+    if root != Int32(0)
         x = Float32(mod(k - 1, w) + 1); y = Float32((k - 1) ÷ w + 1)
         KA.@atomic count[root] += Int32(1)
         for d in 1:16
@@ -296,10 +144,10 @@ end
     i = @index(Global)
     @inbounds spans[i] = isodd(i) ? typemax(Int32) : Int32(0)
 end
-@kernel function detect_spans!(spans, @Const(parents), @Const(roots), w::Int, candidates::Int)
+@kernel function detect_spans!(spans, @Const(labels), @Const(roots), w::Int, candidates::Int)
     k = @index(Global)
-    if @inbounds parents[k] != Int32(0)
-        root = detect_root(parents, Int32(k))
+    @inbounds root = labels[k]
+    if root != Int32(0)
         x = Int32(mod(k - 1, w) + 1); y = (k - 1) ÷ w + 1
         for c in 1:candidates
             if @inbounds roots[c] == root
@@ -316,7 +164,7 @@ end
     v = 0f0
     for o in -2:2
         r = q + Float32(o) * d
-        v += whiteness(sample(img, r[1], r[2]))
+        v += whiteness(GF.bilinear(img, r[1], r[2]))
     end
     v / 5f0
 end
@@ -374,7 +222,7 @@ end
 end
 
 # Each thumbnail pixel is the mean of samples×samples points spread over its
-# area, read bilinearly from the shrunk luminance.
+# area, read bilinearly from the shrunk luma.
 @kernel function detect_thumbnail!(out, @Const(lum), @Const(H), tw::Int, samples::Int)
     i = @index(Global)
     u = Float32(mod(i - 1, tw) + 1); v = Float32((i - 1) ÷ tw + 1)
@@ -387,7 +235,7 @@ end
             sx = (H[1] * x + H[2] * y + H[3]) / z
             sy = (H[4] * x + H[5] * y + H[6]) / z
         end
-        s += sample(lum, sx, sy)
+        s += GF.bilinear(lum, sx, sy)
     end
     @inbounds out[i] = s / Float32(samples * samples)
 end
@@ -432,8 +280,7 @@ mutable struct PageDetector{D}
     frame::NTuple{2, Int}
     factor::Int
     small::NTuple{2, Int}
-    buffers::Dict{Symbol, Any}
-    plans::Dict{Any, Any}
+    arrays::DeviceArrays{D}
 end
 
 function PageDetector(; select = anygpu, detect_size::Int = 800, thumbnail_size::NTuple{2, Int} = (48, 68),
@@ -442,26 +289,16 @@ function PageDetector(; select = anygpu, detect_size::Int = 800, thumbnail_size:
     device = Mantle.Device(select)
     PageDetector(device, detect_size, thumbnail_size, thumbnail_samples, samples, Float64(min_area), Float64(max_area),
         Float64(min_rectangularity), Float32(min_contrast), Float32(min_drop), Float32(max_spread), border, candidates, opening,
-        Float32(coarse_search), 0, (0, 0), 1, (0, 0), Dict{Symbol, Any}(), Dict{Any, Any}())
+        Float32(coarse_search), 0, (0, 0), 1, (0, 0), DeviceArrays(device))
 end
 
 function Base.close(d::PageDetector)
-    Mantle.waitidle(d.device)
-    foreach(Mantle.free!, values(d.plans)); empty!(d.plans)
-    foreach(Mantle.free!, values(d.buffers)); empty!(d.buffers)
+    empty!(d.arrays)
     d.frame = (0, 0)
     nothing
 end
 
-detect_buffer!(d::PageDetector, name, T, dims) = get!(() -> Mantle.Buffer(d.device, T, dims), d.buffers, name)
-
-function detect_plan(f, d::PageDetector, key)
-    get!(d.plans, key) do
-        g = Mantle.Graph(d.device)
-        f(g)
-        Mantle.record!(Mantle.Plan(g))
-    end
-end
+detect_run!(d::PageDetector, key) = Mantle.run!(d.arrays.plans[key])
 
 # Buffers and the per-frame pass for frames of `size(img)`.
 function setup!(d::PageDetector, img::AbstractMatrix{RGB{N0f8}})
@@ -473,50 +310,49 @@ function setup!(d::PageDetector, img::AbstractMatrix{RGB{N0f8}})
     n = w * h
     n < 2^20 || throw(ArgumentError("detect_size too large: shrunk frame needs fewer than 2^20 pixels"))
     d.factor, d.small = f, (w, h)
-    b(name, T, dims) = detect_buffer!(d, name, T, dims)
+    b(name, T, dims) = array!(d.arrays, name, T, dims)
     input = b(:input, RGB{N0f8}, (W, H)); frame = b(:frame, RGB{Float32}, (W, H))
     rgb = b(:rgb, RGB{N0f8}, (w, h)); lum = b(:lum, Float32, (w, h)); white = b(:white, Float32, (w, h))
-    shrink_params = b(:shrink_params, Int32, (3,)); copyto!(shrink_params, Int32[f, 0, 0])
-    hist = b(:hist, Int32, (256, DETECT_HIST_GROUPS)); threshold = b(:threshold, Float32, (1,))
-    mask = b(:mask, Int32, (w, h)); eroded = b(:eroded, Int32, (w, h))
-    parents = b(:parents, Int32, (n,)); count = b(:count, Int32, (n,))
+    hist = b(:hist, Int32, (256, 64)); otsu = b(:otsu, Float32, (2,))
+    mask = b(:mask, Int32, (w, h)); opened = b(:opened, Int32, (w, h))
+    labels = b(:labels, Int32, (n,)); count = b(:count, Int32, (n,))
     extreme = b(:extreme, UInt32, (16, n)); counter = b(:counter, Int32, (1,))
     min_count = Int32(ceil(d.min_area / 2 * n))
     # Enough slots for every region that can reach min_count.
     d.capacity = n ÷ Int(min_count) + 1
     list = b(:list, UInt32, (18, d.capacity))
-    detect_plan(d, :frame) do g
-        Mantle.dispatch!(g, page_copy!, (frame, input), W * H; name = "frame to float")
-        Mantle.dispatch!(g, shrink!, (rgb, frame, shrink_params, w), n; name = "shrink")
+    plan!(d.arrays, :frame) do g
+        # Scattered reads of packed three-byte RGB{N0f8} faulted on RADV; the
+        # edges sample a Float32 copy.
+        GF.convertpixels!(g, frame, input)
+        GF.areadownscale!(g, rgb, frame, GF.Blocks(f))
         Mantle.dispatch!(g, detect_features!, (lum, white, rgb), n; name = "whiteness")
-        Mantle.dispatch!(g, detect_hist_clear!, (hist,), length(hist); name = "clear histogram")
-        Mantle.dispatch!(g, detect_hist!, (hist, white), n; name = "whiteness histogram")
-        Mantle.dispatch!(g, detect_otsu!, (threshold, hist, d.min_contrast), 1; name = "Otsu threshold")
-        Mantle.dispatch!(g, detect_mask!, (mask, white, threshold), n; name = "paper mask")
-        Mantle.dispatch!(g, detect_morph!, (eroded, mask, w, h, d.opening, false), n; name = "erode")
-        Mantle.dispatch!(g, detect_morph!, (mask, eroded, w, h, d.opening, true), n; name = "dilate")
-        Mantle.dispatch!(g, detect_cc_init!, (parents, count, extreme, counter, mask), n; name = "regions init")
-        Mantle.dispatch!(g, detect_cc_merge!, (parents, mask, w), n; name = "regions union")
-        Mantle.dispatch!(g, detect_cc_stats!, (count, extreme, parents, w), n; name = "region statistics")
+        GF.histogram!(g, hist, white, identity, (0.0f0, 1.0f0))
+        GF.otsu!(g, otsu, hist, (0.0f0, 1.0f0))
+        Mantle.dispatch!(g, detect_mask!, (mask, white, otsu, d.min_contrast), n; name = "paper mask")
+        GF.opening!(g, mask, mask, d.opening, opened)
+        GF.components!(g, labels, mask, !iszero)
+        Mantle.dispatch!(g, detect_stats_clear!, (count, extreme, counter), n; name = "clear region statistics")
+        Mantle.dispatch!(g, detect_cc_stats!, (count, extreme, labels, w), n; name = "region statistics")
         Mantle.dispatch!(g, detect_cc_compact!, (list, counter, count, extreme, min_count, d.capacity), n; name = "large regions")
     end
     roots = b(:roots, Int32, (d.candidates,)); spans = b(:spans, Int32, (2, h, d.candidates))
-    detect_plan(d, :spans) do g
+    plan!(d.arrays, :spans) do g
         Mantle.dispatch!(g, detect_spans_clear!, (spans,), length(spans); name = "clear spans")
-        Mantle.dispatch!(g, detect_spans!, (spans, parents, roots, w, d.candidates), n; name = "row spans")
+        Mantle.dispatch!(g, detect_spans!, (spans, labels, roots, w, d.candidates), n; name = "row spans")
     end
     # The same edge measurement on two images: the shrunk whiteness, with a
     # wide search around the region's outline, and then the full frame.
     for (scale, image) in ((:small, white), (:full, frame))
         params = b(Symbol(:edge_params_, scale), Float32, (11,))
         points = b(Symbol(:points_, scale), Float32, (2, 4d.samples))
-        detect_plan(d, scale) do g
+        plan!(d.arrays, scale) do g
             Mantle.dispatch!(g, detect_edges!, (points, image, params, d.samples), 4d.samples; name = "edge profiles $scale")
         end
     end
     tw, th = d.thumbnail_size
     homography = b(:homography, Float32, (9,)); thumb = b(:thumbnail, Float32, (tw, th))
-    detect_plan(d, :thumbnail) do g
+    plan!(d.arrays, :thumbnail) do g
         Mantle.dispatch!(g, detect_thumbnail!, (thumb, lum, homography, tw, d.thumbnail_samples), tw * th; name = "thumbnail")
     end
     d.frame = (W, H)
@@ -531,26 +367,26 @@ regions. [`detect!`](@ref) does this first.
 """
 function upload!(d::PageDetector, img::AbstractMatrix{RGB{N0f8}})
     setup!(d, img)
-    copyto!(d.buffers[:input], img)
-    Mantle.run!(d.plans[:frame])
+    copyto!(d.arrays[:input], img)
+    detect_run!(d, :frame)
     return d
 end
 
 # Rough quadrilaterals of the largest regions, in shrunk coordinates, best first.
 function rough_quads(d::PageDetector)
     w, h = d.small
-    counter = zeros(Int32, 1); copyto!(counter, d.buffers[:counter])
+    counter = zeros(Int32, 1); copyto!(counter, d.arrays[:counter])
     found = Int(counter[1])
     found == 0 && return Tuple{NTuple{4, Vec2f}, Float32}[]
-    list = zeros(UInt32, 18, d.capacity); copyto!(list, d.buffers[:list])
+    list = zeros(UInt32, 18, d.capacity); copyto!(list, d.arrays[:list])
     order = first(sort(1:found; by = s -> list[2, s], rev = true), d.candidates)
     roots = zeros(Int32, d.candidates)
     for (c, s) in enumerate(order)
         roots[c] = Int32(list[1, s])
     end
-    copyto!(d.buffers[:roots], roots)
-    Mantle.run!(d.plans[:spans])
-    spans = zeros(Int32, 2, h, d.candidates); copyto!(spans, d.buffers[:spans])
+    copyto!(d.arrays[:roots], roots)
+    detect_run!(d, :spans)
+    spans = zeros(Int32, 2, h, d.candidates); copyto!(spans, d.arrays[:spans])
     quads = Tuple{NTuple{4, Vec2f}, Float32}[]
     for (c, s) in enumerate(order)
         # Pixel centres of the extreme pixels: a convex polygon inside the hull.
@@ -616,9 +452,9 @@ points must lie within `max_spread` shrunk pixels of a line.
 """
 function refine(d::PageDetector, scale::Symbol, quad::NTuple{4, Vec2f}, search::Real; margin = 0.08f0)
     params = Float32[quad[1]..., quad[2]..., quad[3]..., quad[4]..., search, margin, d.min_drop]
-    copyto!(d.buffers[Symbol(:edge_params_, scale)], params)
-    Mantle.run!(d.plans[scale])
-    raw = zeros(Float32, 2, 4d.samples); copyto!(raw, d.buffers[Symbol(:points_, scale)])
+    copyto!(d.arrays[Symbol(:edge_params_, scale)], params)
+    detect_run!(d, scale)
+    raw = zeros(Float32, 2, 4d.samples); copyto!(raw, d.arrays[Symbol(:points_, scale)])
     lines = map(1:4) do e
         pts = [Vec2f(raw[1, i], raw[2, i]) for i in ((e - 1) * d.samples + 1):(e * d.samples) if !isnan(raw[1, i])]
         length(pts) >= d.samples ÷ 2 || return nothing
@@ -681,9 +517,9 @@ function thumbnail(d::PageDetector, page::Page)
     tw, th = d.thumbnail_size; f = d.factor
     target = (Vec2f(0.5, 0.5), Vec2f(tw + 0.5, 0.5), Vec2f(tw + 0.5, th + 0.5), Vec2f(0.5, th + 0.5))
     H = homography(target, map(p -> (p .- 0.5f0) ./ f .+ 0.5f0, portrait(page.corners)))
-    copyto!(d.buffers[:homography], Float32[H[i, j] for i in 1:3 for j in 1:3])
-    Mantle.run!(d.plans[:thumbnail])
-    t = zeros(Float32, tw, th); copyto!(t, d.buffers[:thumbnail])
+    copyto!(d.arrays[:homography], Float32[H[i, j] for i in 1:3 for j in 1:3])
+    detect_run!(d, :thumbnail)
+    t = zeros(Float32, tw, th); copyto!(t, d.arrays[:thumbnail])
     t .-= sum(t) / length(t)
     s = sqrt(sum(abs2, t) / length(t))
     return t ./ max(s, 0.1f0)
@@ -714,6 +550,6 @@ function detect!(d::PageDetector, img::AbstractMatrix{RGB{N0f8}})
     page = find_page(d)
     thumb = page === nothing ? nothing : thumbnail(d, page)
     preview = Matrix{RGB{N0f8}}(undef, d.small)
-    copyto!(preview, d.buffers[:rgb])
+    copyto!(preview, d.arrays[:rgb])
     return Detection(page, thumb, preview, d.factor)
 end

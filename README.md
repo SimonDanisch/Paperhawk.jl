@@ -57,7 +57,8 @@ repository. See [docs/gui.md](docs/gui.md) for the scanner and
   a summary by Ternary-Bonsai-2 27B through `BonsaiRunner`.
 
 GPU work runs through [Mantle](https://github.com/SimonDanisch/Mantle.jl) on
-Vulkan, written in Julia with KernelAbstractions.
+Vulkan, written in Julia with KernelAbstractions. The image operations are
+JuliaVision's `GPUFiltering`; Paperhawk keeps only the page's own kernels.
 
 ## Tests
 

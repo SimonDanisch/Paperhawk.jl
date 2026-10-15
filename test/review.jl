@@ -27,7 +27,7 @@ end
         angle=rotation===nothing ? 0 : rotation
         image=turn(image,angle)
         save(out,permutedims(image))
-        empty=Paperhawk.luminance(image[1,1])>0.95
+        empty=gray(Gray(image[1,1]))>0.95
         (words=empty ? Word[] : [Word("Rechnnng",10,15,60,12,15,12,70f0)],blank=empty,rotation=angle)
     end
     mktempdir() do dir

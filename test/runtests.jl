@@ -61,11 +61,6 @@ end
 
 @testset "Paperhawk" begin
     include("draftpng.jl")
-    @testset "bilinear sampling at singleton borders" begin
-        @test Paperhawk.sample(fill(0.3f0,1,1),-10,20)==0.3f0
-        @test Paperhawk.sample(reshape(Float32[0,1],1,2),1,1.5)==0.5f0
-        @test Paperhawk.sample(reshape(Float32[0,1],2,1),1.5,1)==0.5f0
-    end
     @testset "a rotated, slightly tilted A4 sheet" begin
         # About 2° rotation and a little perspective, roughly the size A4 takes in the frame.
         truth = (Vec2f(1100.3, 420.7), Vec2f(3480.2, 505.1), Vec2f(3390.6, 3101.4), Vec2f(980.9, 3020.2))
