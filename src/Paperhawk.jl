@@ -33,6 +33,7 @@ import SQLite, DBInterface
 import FileWatching.Pidfile
 using ImageCore
 using PNGFiles, JpegTurbo, CodecZlib
+using Base64: base64encode
 using FFMPEG_jll
 using GeometryBasics: Vec, Vec2f, Vec3, Mat, Mat3f
 import Mantle, PPOCRRunner, UVDocRunner, BonsaiRunner
@@ -53,6 +54,7 @@ export Page, PageDetector, Detection, detect!, find_page, paper_size
 export Trigger, update!, beep
 export Word, PaddleOCR, orientation, read_words, process_page
 export PDFPage, write_pdf
+export PageLayout, ScannedPage, markdown, reconstruction
 export DocumentArchive, BonsaiClassifier
 export archive_document!, document_record, search_documents, update_document!, retry_classification!, wait_archive
 export ReviewSession, scanner, scanner_gui, review_add!, review_edit!, review_move!, review_delete!, review_undo!
@@ -65,9 +67,11 @@ include("detect.jl")
 include("warp.jl")
 include("trigger.jl")
 include("page.jl")
+include("layout.jl")
 include("ocr.jl")
 include("preview.jl")
 include("pdf.jl")
+include("reconstruct.jl")
 include("classify.jl")
 include("database.jl")
 include("archive.jl")

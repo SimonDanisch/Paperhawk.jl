@@ -148,14 +148,15 @@ read_words(e::PaddleOCR, img::AbstractMatrix) = ongpu(r -> words(PPOCRRunner.rea
 """
     process_page(ocr, img; corners = nothing, dewarp = false, mode = :color, paper = :a4, dpi = 300,
                  rotation = nothing, image_ready = image -> nothing, output = nothing)
-        -> (; image, words, blank, rotation)
+        -> (; image, words, blank, rotation, layout)
 
 `img[x, y]` warped flat from the frame where the sheet has `corners` (or taken
 as a flat page without them), straightened by UVDoc with `dewarp`, cleaned,
-turned upright, checked for being blank and read, all on `ocr`'s GPU. `mode` is
-the image's format, see [`packed`](@ref). `rotation` overrides the detected
-one. `image_ready(image)` runs with the finished image before the words are
-read, so it can be shown and saved meanwhile.
+turned upright, checked for being blank and read, all on `ocr`'s GPU, and its
+[`PageLayout`](@ref) measured. `mode` is the image's format, see
+[`packed`](@ref). `rotation` overrides the detected one. `image_ready(image)`
+runs with the finished image before the words are read, so it can be shown and
+saved meanwhile.
 """
 function process_page(ocr::PaddleOCR, img::AbstractMatrix; mode::Symbol = :color, kw...)
     mode in (:color, :gray, :bw) || throw(ArgumentError("mode must be :color, :gray or :bw, not $(repr(mode))"))
@@ -175,6 +176,7 @@ function process_page(r::PageReader, img::AbstractMatrix; corners = nothing, dew
     page = rotated!(r, s, degrees)
     image = packed(s, page, mode, output)
     image_ready(image)
-    found = blank ? Word[] : words(PPOCRRunner.read_lines(r.model, page))
-    return (; image, words = found, blank, rotation = degrees)
+    lines = blank ? PPOCRRunner.TextLine[] : PPOCRRunner.read_lines(r.model, page)
+    layout = blank ? PageLayout(size(page)) : layout!(s, page, lines)
+    return (; image, words = words(lines), blank, rotation = degrees, layout)
 end

@@ -2,7 +2,7 @@
 
 julia_version = "1.12.7"
 manifest_format = "2.0"
-project_hash = "7fd0076a4718c6821f97acf505627972f2e31fea"
+project_hash = "ae6677e8ee0043437d770adc0a7292deec16077f"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1327,7 +1327,7 @@ uuid = "36c8627f-9965-5494-a995-c6b170f724f3"
 version = "1.58.2+0"
 
 [[deps.Paperhawk]]
-deps = ["BonsaiRunner", "CodecZlib", "DBInterface", "Dates", "FFMPEG_jll", "FileWatching", "GLMakie", "GPUFiltering", "GeometryBasics", "ImageCore", "JSON3", "JpegTurbo", "KernelAbstractions", "LinearAlgebra", "Mantle", "PNGFiles", "PPOCRRunner", "SHA", "SQLite", "Sockets", "TOML", "UVDocRunner"]
+deps = ["Base64", "BonsaiRunner", "CodecZlib", "DBInterface", "Dates", "FFMPEG_jll", "FileWatching", "GLMakie", "GPUFiltering", "GeometryBasics", "ImageCore", "JSON3", "JpegTurbo", "KernelAbstractions", "LinearAlgebra", "Mantle", "PNGFiles", "PPOCRRunner", "SHA", "SQLite", "Sockets", "TOML", "UVDocRunner"]
 path = "."
 uuid = "93e2e269-07d8-4757-8cb6-33d91e81e191"
 version = "0.1.0"

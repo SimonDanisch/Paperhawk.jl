@@ -51,7 +51,19 @@ Mit `limit=100, offset=0` lassen sich Ergebnisse seitenweise abrufen.
 
 Daneben enthält das Archiv `documents/000001.pdf`, `text/000001.txt` und
 `records/000001.json`. Diese Dateien bleiben die Grundlage für einen Wiederaufbau
-der Datenbank. Bestehende Archive werden beim Öffnen automatisch indiziert und
+der Datenbank. Zu jedem Dokument gehören außerdem:
+
+- `originals/000001-1.png`: die Aufnahme der Kamera, unverändert.
+- `images/000001-1.png`: die bereinigte Seite, verlustfrei.
+- `markdown/000001.md`: der Text als Markdown zum schnellen Lesen, Absätze und
+  Überschriften aus der Seitengeometrie, ohne Unterschriften und Stempel.
+- `reconstructed/000001.html`: die nachgebaute Seite als Vektorgrafik, ein SVG
+  pro Seite. Der Text steht an seiner Stelle, in Größe und Farbe der Vorlage;
+  Logos, Unterschriften, Stempel und Linien sind als Ausschnitte eingebettet.
+  Jeder Browser zeigt und druckt sie.
+
+Die Seiten sind 1-basiert nummeriert. Archive aus früheren Versionen haben diese
+Dateien nicht. Bestehende Archive werden beim Öffnen automatisch indiziert und
 nach einem unterbrochenen Update abgeglichen. In `numbers/` stehen vergebene
 Nummern, in `sources/` die Zuordnungen zu Rohaufnahmen. Zum Sichern das Archiv
 schließen und den gesamten Ordner kopieren. Nur ein Schreiber kann ein Archiv

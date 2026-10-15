@@ -78,6 +78,12 @@ end
             @test basename.(paths)==["000001.pdf"]
             @test only(search_documents(a,"rechnung"))["number"]==1
             @test document_record(a,1)["pages"]==1
+            # Beside the PDF: the camera frame, the cleaned page, Markdown and the reconstruction.
+            record=document_record(a,1)
+            @test length(record["originals"])==1 && isfile(joinpath(a.root,only(record["originals"])))
+            @test length(record["images"])==1 && isfile(joinpath(a.root,only(record["images"])))
+            @test occursin("Rechnung",read(joinpath(a.root,record["markdown"]),String))
+            @test occursin("Rechnung</text>",read(joinpath(a.root,record["reconstruction"]),String))
             @test document_record(a,1)["sides"][2]["pdf_page"]===nothing
             @test review_commit!(s,a)==paths
             other=DocumentArchive(joinpath(dir,"other-archive"))

@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Simon Danisch <sdanisch@gmail.com>"]
 
 [deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 BonsaiRunner = "f8e6003a-513a-4f5e-98bb-1b2c050ff941"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 DBInterface = "a10d1c49-ce27-4219-8d33-6db1a4562965"

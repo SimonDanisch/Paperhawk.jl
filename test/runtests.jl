@@ -138,6 +138,7 @@ end
     include("archive.jl")
     include("database.jl")
     include("review.jl")
+    include("reconstruct.jl")
     include("pipeline.jl")
     include("gui.jl")
 end

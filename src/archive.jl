@@ -5,18 +5,22 @@ function document_number(n::Integer)
     return lpad(string(n),6,'0')
 end
 
-function atomic_json(path, data)
+"""Write `content` to `path` through a temporary file beside it, renamed into place."""
+function atomic_write(path, content)
     tmp, io = mktemp(dirname(path))
     try
-        JSON3.write(io,data)
+        write(io, content)
         close(io)
-        Base.Filesystem.rename(tmp,path)
+        Base.Filesystem.rename(tmp, path)
     finally
         isopen(io) && close(io)
         isfile(tmp) && rm(tmp)
     end
     return path
 end
+
+atomic_json(path, data) = atomic_write(path, JSON3.write(data))
+atomic_copy(source, path) = atomic_write(path, read(source))
 
 """
     DocumentArchive(root; classifier=nothing, categories=DEFAULT_CATEGORIES)
@@ -42,7 +46,7 @@ end
 
 function DocumentArchive(root::AbstractString; classifier=nothing, categories=DEFAULT_CATEGORIES)
     root = abspath(root)
-    for dir in ("documents","records","text","numbers","sources")
+    for dir in ("documents","records","text","numbers","sources","originals","images","markdown","reconstructed")
         mkpath(joinpath(root,dir))
     end
     writer = Pidfile.mkpidlock(joinpath(root,".writer.pid");wait=false,stale_age=60)
@@ -121,15 +125,22 @@ end
 title(text::AbstractString; words::Int = 8) = join(first(split(text), words), ' ')
 
 """
-    archive_document!(archive, pages; text, sources=[], sides=nothing) -> record
+    archive_document!(archive, pages; text, sources=[], sides=nothing, originals=[], images=[], scans=[]) -> record
 
 Save a document under the next number. The source capture paths make a
 repeated or interrupted commit idempotent: the same captures get the same
 number, and an existing numbered document is never overwritten by a different
 capture.
+
+Beside the PDF and its text, each page's `originals` (the camera frame) and
+`images` (the cleaned page) are kept as they are, and from the `scans`, the
+pages as [`ScannedPage`](@ref)s, the document is written as Markdown and as a
+vector reconstruction ([`markdown`](@ref), [`reconstruction`](@ref)).
 """
 function archive_document!(a::DocumentArchive,pages::AbstractVector{PDFPage}; text::AbstractString,
-        sources::AbstractVector{<:AbstractString}=String[], sides=nothing)
+        sources::AbstractVector{<:AbstractString}=String[], sides=nothing,
+        originals::AbstractVector{<:AbstractString}=String[], images::AbstractVector{<:AbstractString}=String[],
+        scans::AbstractVector{<:ScannedPage}=ScannedPage[])
     isempty(pages) && throw(ArgumentError("cannot archive an empty document"))
     if sides !== nothing
         numbered = [s["pdf_page"] for s in sides if s["pdf_page"] !== nothing]
@@ -181,7 +192,20 @@ function archive_document!(a::DocumentArchive,pages::AbstractVector{PDFPage}; te
             isfile(tmp) && rm(tmp)
         end
         write(joinpath(a.root,txt),text)
+        heading = "$label — $(title(text))"
+        kept(dir, files) = [begin
+                                file = joinpath(dir, "$label-$k$(splitext(f)[2])")
+                                atomic_copy(f, joinpath(a.root, file)); file
+                            end for (k, f) in enumerate(files)]
+        originalfiles, imagefiles = kept("originals", originals), kept("images", images)
+        md = isempty(scans) ? nothing : joinpath("markdown", label*".md")
+        html = isempty(scans) ? nothing : joinpath("reconstructed", label*".html")
+        if !isempty(scans)
+            atomic_write(joinpath(a.root,md), markdown(scans; title=heading))
+            atomic_write(joinpath(a.root,html), reconstruction(scans; title=heading))
+        end
         r = Dict{String,Any}("version"=>1,"number"=>n,"pdf"=>pdf,"text"=>txt,
+            "originals"=>originalfiles,"images"=>imagefiles,"markdown"=>md,"reconstruction"=>html,
             "pages"=>length(pages),"sources"=>src,"source_key"=>sourcekey,
             "sides"=>(sides === nothing ? [Dict("pdf_page"=>i,"sheet"=>nothing,"side"=>"unknown","source"=>"","blank"=>false) for i in eachindex(pages)] : sides),
             "created"=>string(Dates.now()),"status"=>"pending","category"=>"Unsortiert",

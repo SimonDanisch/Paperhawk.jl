@@ -14,6 +14,9 @@ mutable struct ReviewEntry
     status::Symbol
     error::String
     words::Vector{Word}
+    # How the page is set; `nothing` until it is read, and for drafts from
+    # before layouts were measured.
+    layout::Union{Nothing,PageLayout}
     blank::Bool
 end
 
@@ -56,7 +59,7 @@ function review_record(e::ReviewEntry)
         "rotation"=>e.rotation,"detected_rotation"=>e.detected_rotation,
         "side"=>String(e.side),"starts"=>e.starts,"included"=>e.included,
         "manual_include"=>e.manual_include,"revision"=>e.revision,"status"=>String(e.status),"error"=>e.error,
-        "words"=>e.words,"blank"=>e.blank)
+        "words"=>e.words,"layout"=>e.layout,"blank"=>e.blank)
 end
 
 function review_save!(s::ReviewSession)
@@ -130,7 +133,7 @@ function review_prepare(source,corners,rotation,output;ocr,dpi,dewarp,image_save
     finally
         saving[]===nothing || fetch(saving[])
     end
-    return (words=result.words,blank=result.blank,rotation=result.rotation)
+    return (words=result.words,blank=result.blank,rotation=result.rotation,layout=result.layout)
 end
 
 """
@@ -160,10 +163,12 @@ function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=no
         for r in data["entries"]
             corners=r["corners"] === nothing ? nothing : Tuple(Vec2f.(r["corners"]))
             words=[Word((w[string(f)] for f in fieldnames(Word))...) for w in r["words"]]
+            layout=get(r,"layout",nothing)
             status=Symbol(r["status"])
             status == :ready && !isfile(r["output"]) && (status=:queued)
             push!(entries,ReviewEntry(r["id"],r["source"],r["output"],corners,r["rotation"],r["detected_rotation"],
-                Symbol(r["side"]),r["starts"],r["included"],r["manual_include"],r["revision"],status,r["error"],words,r["blank"]))
+                Symbol(r["side"]),r["starts"],r["included"],r["manual_include"],r["revision"],status,r["error"],words,
+                layout===nothing ? nothing : PageLayout(layout),r["blank"]))
         end
     end
     owns_ocr=processor===nothing && ocr===nothing
@@ -211,6 +216,8 @@ function ReviewSession(dir::AbstractString;duplex::Bool=true,dpi::Int=300,ocr=no
                 e=s.entries[i]
                 e.revision==rev || return
                 e.words=result.words; e.blank=result.blank; e.detected_rotation=result.rotation
+                # A processor of the caller's may leave the layout out.
+                e.layout=get(result,:layout,nothing)
                 e.manual_include || (e.included=!result.blank)
                 e.status=:ready; e.error=""; review_save!(s)
             end
@@ -327,12 +334,12 @@ function review_add!(s::ReviewSession,img::AbstractMatrix;corners=nothing,replac
         if replace_id !== nothing
             e=review_entry(s,replace_id)
             e.source=source; e.corners=corners; e.rotation=nothing
-            e.words=Word[]; e.blank=false; e.manual_include=false; e.included=true
+            e.words=Word[]; e.layout=nothing; e.blank=false; e.manual_include=false; e.included=true
         else
             index=before_id === nothing ? length(s.entries)+1 : findfirst(e->e.id==before_id,s.entries)
             index === nothing && throw(ArgumentError("Aufnahme nicht gefunden"))
             side=!s.duplex ? :single : (index==1 || s.entries[index-1].side != :front ? :front : :back)
-            e=ReviewEntry(n,source,"",corners,nothing,0,side,side!=:back,true,false,0,:queued,"",Word[],false)
+            e=ReviewEntry(n,source,"",corners,nothing,0,side,side!=:back,true,false,0,:queued,"",Word[],nothing,false)
             insert!(s.entries,index,e)
         end
         review_queue!(s,e,capture);queued=true;review_save!(s)
@@ -498,12 +505,13 @@ function review_commit!(s::ReviewSession,a::DocumentArchive)
             if haskey(s.committed,key)
                 push!(paths,joinpath(a.root,document_record(a,s.committed[key])["pdf"])); continue
             end
-            pages=PDFPage[]; textparts=String[]; sides=Dict{String,Any}[]; sheet=0
+            pages=PDFPage[]; scans=ScannedPage[]; textparts=String[]; sides=Dict{String,Any}[]; sheet=0
             for e in group
                 e.side != :back && (sheet+=1)
                 if e.included
                     img=review_load_image(e.output)
                     push!(pages,PDFPage(img,e.words;dpi=s.dpi)); push!(textparts,text(e.words))
+                    push!(scans,ScannedPage(img,e.words,e.layout,s.dpi))
                 end
                 push!(sides,Dict("source"=>e.source,"sheet"=>sheet,"side"=>(e.side==:single ? "unknown" : String(e.side)),
                     "blank"=>e.blank,"pdf_page"=>(e.included ? length(pages) : nothing)))
@@ -511,7 +519,9 @@ function review_commit!(s::ReviewSession,a::DocumentArchive)
             # Omitting a nonblank page is an explicit review action; omit it from
             # the committed capture list, while retaining it in the draft.
             filter!(side->side["pdf_page"] !== nothing || side["blank"],sides)
-            r=archive_document!(a,pages;text=join(textparts,"\n\f\n"),sources=[e.source for e in group],sides)
+            included=filter(e->e.included,group)
+            r=archive_document!(a,pages;text=join(textparts,"\n\f\n"),sources=[e.source for e in group],sides,
+                originals=[e.source for e in included],images=[e.output for e in included],scans)
             s.committed[key]=r["number"]; review_save!(s)
             push!(paths,joinpath(a.root,r["pdf"]))
         end
