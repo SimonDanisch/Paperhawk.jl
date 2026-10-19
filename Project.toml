@@ -3,6 +3,9 @@ uuid = "93e2e269-07d8-4757-8cb6-33d91e81e191"
 version = "0.1.0"
 authors = ["Simon Danisch <sdanisch@gmail.com>"]
 
+[workspace]
+projects = ["test"]
+
 [deps]
 Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 BonsaiRunner = "f8e6003a-513a-4f5e-98bb-1b2c050ff941"
@@ -14,38 +17,45 @@ FileWatching = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 GPUFiltering = "0d8d4a14-6fb1-4aec-8b08-0f10adea08ad"
 GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+Gmsh = "705231aa-382f-11e9-3f0c-b7cb4346fdeb"
 ImageCore = "a09fc81d-aa75-5fe9-8630-4744c3626534"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 JpegTurbo = "b835a17e-a41a-41e7-81f0-2f016b05efe0"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+LibGEOS = "a90b1aa1-3769-5649-ba7e-abc5a9d163eb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Mantle = "8f4c1f2e-6a3d-4b71-9c05-2e7d8a1b6f34"
+MuJoCo = "1c101251-5e0f-4746-b44c-0728d433b68a"
 PNGFiles = "f57f5aa1-a3ce-4bc8-8ab9-96f992907883"
+PPDocLayoutRunner = "af74545c-bb7d-41de-988c-5d37636a6f7a"
 PPOCRRunner = "e16c7811-b8c1-4791-91d8-75b683fe5914"
+Packing = "19eb6ba3-879d-56ad-ad62-d5c202156566"
 SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 SQLite = "0aa819cd-b072-5ff4-a722-6bc24af294d9"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 UVDocRunner = "7c6dc493-cef7-40e2-b25f-97e481222d57"
+ZipArchives = "49080126-0e18-4c2a-b176-c102e4b3760c"
 
 [compat]
-julia = "1.12"
 CodecZlib = "0.7.9"
 DBInterface = "2.7.0"
 Dates = "1.11.0"
 FFMPEG_jll = "9.0.2"
 GLMakie = "0.13.15"
 GeometryBasics = "0.5.13"
+Gmsh = "0.3.1"
 ImageCore = "0.10.5"
 JSON3 = "1.14.3"
 JpegTurbo = "0.1.6"
+LibGEOS = "0.9.7"
 LinearAlgebra = "1.12.0"
+MuJoCo = "0.2.3"
 PNGFiles = "0.4.5"
+Packing = "0.5.1"
 SHA = "0.7.0"
 SQLite = "1.9.0"
 Sockets = "1.11.0"
 TOML = "1.0.3"
-
-# The tests' project shares this one's manifest.
-[workspace]
-projects = ["test"]
+ZipArchives = "2.6.1"
+julia = "1.12"

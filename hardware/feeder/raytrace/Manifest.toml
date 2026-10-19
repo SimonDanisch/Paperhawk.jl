@@ -611,7 +611,7 @@ version = "6.3.0+2"
 deps = ["AcceleratedKernels", "Adapt", "GPUArraysCore", "KernelAbstractions", "LLVM", "LinearAlgebra", "Printf", "Random", "Reexport", "ScopedValues", "Serialization", "SparseArrays", "Statistics"]
 path = "../../../dev/GPUArrays"
 uuid = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
-version = "12.1.0"
+version = "12.1.1"
 
     [deps.GPUArrays.extensions]
     JLD2Ext = "JLD2"
@@ -976,7 +976,7 @@ version = "1.12.0"
 deps = ["Adapt", "Atomix", "GPUCompiler", "GPUToolbox", "KernelInterface", "LLVM", "MacroTools", "PrecompileTools", "Printf", "Random", "Random123", "RandomNumbers", "SPIRVIntrinsics", "SPIRV_LLVM_Backend_jll", "SPIRV_Tools_jll", "StaticArraysCore", "UnsafeAtomics", "pocl_standalone_jll"]
 path = "../../../dev/KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.10.0-dev"
+version = "0.10.1"
 weakdeps = ["LinearAlgebra", "SparseArrays", "StaticArrays"]
 
     [deps.KernelAbstractions.extensions]
@@ -993,7 +993,7 @@ version = "0.6.12"
 [[deps.KernelInterface]]
 path = "../../../dev/KernelAbstractions/lib/KernelInterface"
 uuid = "4ee993da-d684-4d17-a7dd-4e58e78d92bf"
-version = "0.4.0-dev"
+version = "0.4.1"
 
 [[deps.LERC_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1395,10 +1395,10 @@ uuid = "baad4e97-8daa-5946-aac2-2edac59d34e1"
 version = "7.9.3+0"
 
 [[deps.ObjectiveC]]
-deps = ["CEnum", "Libdl", "Preferences"]
-git-tree-sha1 = "4abd3c3e24a1631d1e512673cda4835a612f88ab"
+deps = ["CEnum", "Preferences"]
+git-tree-sha1 = "fe4bcc4a398feda2a24ebd3250b59a1519cb7799"
 uuid = "e86c9b32-1129-44ac-8ea0-90d5bb39ded9"
-version = "6.0.1"
+version = "7.1.0"
 
 [[deps.Observables]]
 git-tree-sha1 = "7438a59546cf62428fc9d1bc94729146d37a7225"
