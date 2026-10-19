@@ -1,0 +1,53 @@
+# Raytraced assembly pictures: PaperFeeder's dependencies plus RayMakie. Its own environment
+# because RayMakie needs Makie from the same Makie.jl commit, which the app does not use.
+
+[deps]
+CompilerCaching = "9db33cc3-5358-4881-8759-fa4194144afd"
+ComputePipeline = "95dc2771-c249-4cd0-9c9f-1f3b4330693c"
+Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+GPUArrays = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+Gmsh = "705231aa-382f-11e9-3f0c-b7cb4346fdeb"
+Hikari = "afc56b53-c9a9-482a-a956-d1d800e05558"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+KernelInterface = "4ee993da-d684-4d17-a7dd-4e58e78d92bf"
+Lava = "3a680b1f-cb25-4bee-9cf7-bc880b76dc8c"
+LibGEOS = "a90b1aa1-3769-5649-ba7e-abc5a9d163eb"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+Mantle = "8f4c1f2e-6a3d-4b71-9c05-2e7d8a1b6f34"
+Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
+MuJoCo = "1c101251-5e0f-4746-b44c-0728d433b68a"
+Packing = "19eb6ba3-879d-56ad-ad62-d5c202156566"
+RayMakie = "70852e3a-d594-4041-8350-783a02753e02"
+Raycore = "afc56b53-c9a9-482a-a956-d1d800e05559"
+Vulkan = "9f14b124-c50e-4008-a7d4-969b3a6cd68a"
+VulkanCore = "16167f82-ea26-5cba-b1de-ed6fd5e30a11"
+ZipArchives = "49080126-0e18-4c2a-b176-c102e4b3760c"
+
+[sources]
+ComputePipeline = {url = "https://github.com/MakieOrg/Makie.jl.git", rev = "1ae260809fb59931fb2d41e5b3d6568ae431d0d3", subdir = "ComputePipeline"}
+Makie = {url = "https://github.com/MakieOrg/Makie.jl.git", rev = "1ae260809fb59931fb2d41e5b3d6568ae431d0d3", subdir = "Makie"}
+GLMakie = {url = "https://github.com/MakieOrg/Makie.jl.git", rev = "1ae260809fb59931fb2d41e5b3d6568ae431d0d3", subdir = "GLMakie"}
+RayMakie = {url = "https://github.com/MakieOrg/Makie.jl.git", rev = "1ae260809fb59931fb2d41e5b3d6568ae431d0d3", subdir = "RayMakie"}
+Hikari = {url = "https://github.com/JuliaGraphics/Hikari.jl", rev = "50f4d543d924cda7ed58bc9c1455b5cc3c798201"}
+Mantle = {path = "../../../dev/Mantle"}
+Raycore = {path = "../../../dev/Raycore"}
+Lava = {path = "../../../dev/Lava"}
+Vulkan = {path = "../../../dev/Vulkan"}
+VulkanCore = {path = "../../../dev/VulkanCore"}
+GPUArrays = {path = "../../../dev/GPUArrays"}
+KernelAbstractions = {path = "../../../dev/KernelAbstractions"}
+KernelInterface = {path = "../../../dev/KernelAbstractions/lib/KernelInterface"}
+CompilerCaching = {path = "../../../dev/CompilerCaching"}
+Metal = {path = "../../../dev/Metal"}
+
+[compat]
+GeometryBasics = "0.5.13"
+Gmsh = "0.3.1"
+LibGEOS = "0.9.7"
+MuJoCo = "0.2.3"
+Packing = "0.5.1"
+ZipArchives = "2.6.1"
+julia = "1.12"
