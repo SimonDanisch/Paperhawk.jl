@@ -345,7 +345,7 @@ function assembly_steps(d::FeederDesign, b::Build)
             eye = Vec3f(-620, -520, 420), lookat = Vec3f(-60, -60, 120), up = lying),
         AssemblyStep("Wedges",
             "Stand the frame up. Drive a wedge through the slot of every tenon, six in all, until both plates sit tight on the bars' shoulders.";
-            new = [r"^wedge_" => Vec3f(0, -45, 0)],
+            new = [r"^wedge_" => Vec3f(0, -75, 0)],
             eye = Vec3f(560, -380, 320), lookat = Vec3f(60, -50, 80)),
         AssemblyStep("Tray",
             "Slide the tray in from the back, face up, its edges in the long pockets of both plates, until its ramp stops against the pockets' front ends.";
@@ -365,7 +365,7 @@ function assembly_steps(d::FeederDesign, b::Build)
                 r"^pick_shaft$" => Vec3f(-320, 0, 0), r"^(pick|feed)_collar_\d\d\d$" => Vec3f(40, 0, 0)],
             eye = arm + Vec3f(-480, -420, 300), lookat = v(l.pick, -40)),
         AssemblyStep("Freewheels",
-            "Push the pick ratchet onto the pick shaft's left end, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then its collar.";
+            "Push the pick ratchet onto the pick shaft's left end, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then its collar. The pick cup gear needs no collar of its own: the feed cup gear covers its outer face and keeps it on its shaft with 0.5 mm of play.";
             new = [r"^pick_ratchet$" => 40out, r"^pick_cup_gear$" => 80out, r"^feed_ratchet$" => 70out, r"^feed_cup_gear$" => 110out,
                 r"^feed_collar_out$" => 150out],
             eye = arm + Vec3f(-520, -260, 240), lookat = arm + Vec3f(-20, 20, 0)),
@@ -410,13 +410,14 @@ function step_role(s::AssemblyStep, name)
 end
 
 """
-    insertion_arrow(mesh, offset; gap = 4)
+    insertion_arrow(mesh, offset; gap = 4, shortest = 20, longest = 70)
 
 Where the arrow for a part pulled out by `offset` goes: from the part's leading face (the one
-that moves first on the way in) toward where that face ends up. If the part still overlaps its
-own way in, the arrow pushes it from behind instead. Returns start point and direction.
+that moves first on the way in) toward where that face ends up. Where that leaves no room for
+an arrow `shortest` mm long (its 10 mm tip and some shaft), the arrow pushes the part from
+behind instead. Returns start point and direction.
 """
-function insertion_arrow(m::GeometryBasics.Mesh, offset::Vec3f; gap = 4.0f0, longest = 70.0f0)
+function insertion_arrow(m::GeometryBasics.Mesh, offset::Vec3f; gap = 4.0f0, shortest = 20.0f0, longest = 70.0f0)
     L = norm(offset)
     u = offset / L                                     # the way out; the part goes in along -u
     pts = coordinates(m)
@@ -425,12 +426,12 @@ function insertion_arrow(m::GeometryBasics.Mesh, offset::Vec3f; gap = 4.0f0, lon
     c = Vec3f(sum(pts) / length(pts))
     side = c - dot(c, u) * u                           # the centroid's position across the way in
     free = L - (hi - lo)                               # empty way between the pulled-out part and its place
-    if free > 3gap
+    if free - 2gap >= shortest
         len = min(free - 2gap, longest)
         start = side + (lo + L - gap) * u              # just off the leading face, toward the place
         return start, -len * u
     else
-        len = clamp(L / 2, 15.0f0, longest)
+        len = clamp(L / 2, shortest, longest)
         start = side + (hi + L + gap + len) * u        # behind the trailing face, pushing
         return start, -len * u
     end

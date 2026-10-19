@@ -260,7 +260,7 @@ function insertion_check(d::FeederDesign = FeederDesign(), b::Build = Build(); r
 end
 
 "Smallest distance between the solids `a` and `b` (mm); 0 where they touch or overlap."
-gap(a, b) = minimum(occ().getDistance(i..., j...)[1] for i in a for j in b if i[1] == 3 && j[1] == 3)
+solid_distance(a, b) = minimum(occ().getDistance(i..., j...)[1] for i in a for j in b if i[1] == 3 && j[1] == 3)
 
 """
     box_window(box, other, u, L)
@@ -322,7 +322,7 @@ function sequence_check(d::FeederDesign = FeederDesign(), b::Build = Build(); pl
                         while true
                             occ().translate(moving, ((t - position) * u)...)
                             position = t
-                            distance = gap(moving, tags)
+                            distance = solid_distance(moving, tags)
                             if distance <= 1.0e-6
                                 excess = shared(moving, tags) - at_place
                                 if excess > tolerance

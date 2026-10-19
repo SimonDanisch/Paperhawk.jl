@@ -72,7 +72,7 @@ Put an arm onto each end of the feed shaft, outside the plates, the left one wit
 
 ## 12. Freewheels
 
-Push the pick ratchet onto the pick shaft's left end, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then its collar.
+Push the pick ratchet onto the pick shaft's left end, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then its collar. The pick cup gear needs no collar of its own: the feed cup gear covers its outer face and keeps it on its shaft with 0.5 mm of play.
 
 ![Step 12](assembly/step_12.jpg)
 
