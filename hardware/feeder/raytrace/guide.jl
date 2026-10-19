@@ -136,9 +136,9 @@ function light_direction(s::AssemblyStep)
     return normalize(-0.7f0 * view + up - 0.45f0 * right)
 end
 
-"The rotation from the map's frame into the scene: its +y onto `s.up`, its main light's azimuth onto `light_direction(s)`'s."
+"The rotation from the map's frame into the scene: its +y onto `s.ground`, its main light's azimuth onto `light_direction(s)`'s."
 function sky_rotation(st::Studio, s::AssemblyStep)
-    up = normalize(s.up)
+    up = normalize(s.ground)
     t = light_direction(s)
     to = normalize(t - dot(t, up) * up)
     from = normalize(Vec3f(st.light[1], 0, st.light[3]))
@@ -167,14 +167,15 @@ end
 
 """
 Points the camera of `ax` as the framed step `s` says, focused on its look-at point, and puts
-the desk under everything `placed` (meshes with their offsets), its top at their lowest point.
+the desk under everything `placed` (meshes with their offsets), across `s.ground`, its top at
+their lowest point.
 """
 function camera_and_desk!(st::Studio, ax, s::AssemblyStep, placed; fov)
     cam = Makie.cam3d!(ax.scene; eyeposition = s.eye, s.lookat, upvector = s.up, fov, center = false)
     update_cam!(ax.scene, cam, s.eye, s.lookat, s.up)
     cam.focal_distance[] = norm(s.lookat - s.eye)
     cam.lens_radius[] = st.aperture * cam.focal_distance[]
-    up = normalize(s.up)
+    up = normalize(s.ground)
     low = minimum(minimum(dot(Vec3f(q) + offset, up) for q in coordinates(m)) for (m, offset) in placed)
     x = Vec3f(1, 0, 0)
     a = abs(dot(x, up)) > 0.9f0 ? Vec3f(0, 0, 1) : normalize(x - dot(x, up) * up)

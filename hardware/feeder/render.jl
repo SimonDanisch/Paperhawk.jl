@@ -263,26 +263,34 @@ end
 """
 One assembly step: what it shows and says. `base` matches items shown in place and in color,
 `new` pairs a name pattern with the offset (mm) the items are pulled out along their way in.
-Items of earlier steps are toned down. The camera looks from `eye` toward `lookat`, which
-picture frames itself along that direction (`framing`); `up` is its up direction: `-x` while
-the frame lies on its right plate. With `kept = false` the step only prepares parts (O-rings onto hubs),
-which then show up in later pictures only once a step builds them in. `leads` names the motors
-whose leads the picture draws, as `cable_routes` lays them.
+Items of earlier steps are toned down; with `apart` the step is done on the table, apart from
+what was built so far, and shows and moves only its own items. The camera looks from `eye`
+toward `lookat`, which picture frames itself along that direction (`framing`), with `up` up. `ground` is the real up
+direction while the step is done, what the table lies across: `-x` while the frame lies on
+its right plate. `moves` are the moves the hands make, in order, each a name pattern with the
+way the items come in (`sequence_check` follows them): by default `new`, but parts that go in
+together as one unit move as one. With `kept = false` the step only prepares parts (O-rings
+onto hubs), which then show up in later pictures only once a step builds them in. `leads`
+names the motors whose leads the picture draws, as `cable_routes` lays them.
 """
 struct AssemblyStep
     title::String
     text::String
     base::Regex
     new::Vector{Pair{Regex, Vec3f}}
+    moves::Vector{Pair{Regex, Vec3f}}
     eye::Vec3f
     lookat::Vec3f
     up::Vec3f
+    ground::Vec3f
     kept::Bool
+    apart::Bool
     leads::Vector{String}
 end
 
-AssemblyStep(title, text; base = r"^$", new = Pair{Regex, Vec3f}[], eye, lookat, up = Vec3f(0, 0, 1), kept = true, leads = String[]) =
-    AssemblyStep(title, text, base, new, Vec3f(eye), Vec3f(lookat), Vec3f(up), kept, leads)
+AssemblyStep(title, text; base = r"^$", new = Pair{Regex, Vec3f}[], moves = new, eye, lookat, up = Vec3f(0, 0, 1), ground = up,
+    kept = true, apart = false, leads = String[]) =
+    AssemblyStep(title, text, base, new, moves, Vec3f(eye), Vec3f(lookat), Vec3f(up), Vec3f(ground), kept, apart, leads)
 
 """
     assembly_steps(design, build)
@@ -302,32 +310,35 @@ function assembly_steps(d::FeederDesign, b::Build)
     up = Vec3f(0, 0, 1)
     lying = Vec3f(-1, 0, 0)                     # the frame on its right plate: -x points up
     out = Vec3f(-1, 0, 0)                       # away from the left plate, into the gearbox
-    collars_up(prefix) = Regex("^$(prefix)_collar_-?\\d+\$") => 25up
     gearbox = v(g.motor, left_x(d, b, 20.0))
+    bar = v(l.pad_bar)
     arm = v(l.pick, -o - 10)
     leg = v(along(p, -d.tray_length + TRAY_LEG.at, -40.0))
     return [
         AssemblyStep("Fit the O-rings",
             "Stretch three O-rings into the grooves of the pick hub and of the feed hub, and two onto each exit hub and each idler roller.";
             base = r"^pick_hub$", new = [r"^pick_orings$" => Vec3f(45, 0, 0)],
-            eye = v(l.pick, 130) + Vec3f(0, 90, 60), lookat = v(l.pick, 20), kept = false),
+            eye = v(l.pick, 130) + Vec3f(0, 90, 60), lookat = v(l.pick, 20), kept = false, apart = true),
         AssemblyStep("Electronics onto the carrier",
             "Lay each board into its pocket on the carrier, parts up, onto the shelves under its corners: the drive motor's driver on the left, the exit motor's on the right, the ESP32 in between with its pins down and its USB port to the back. Wire them as in [ELECTRONICS.md](ELECTRONICS.md). Press a clamp frame onto each, its four pegs into the posts.";
-            base = r"^electronics_carrier$", new = [r"_clamp$" => 70up, r"^(uln2003_drive|uln2003_exit|esp32)$" => 35up],
-            eye = Vec3f(260, -330, 230), lookat = Vec3f(0, -52, 35)),
+            base = r"^electronics_carrier$", new = [r"^(uln2003_drive|uln2003_exit|esp32)$" => 35up, r"_clamp$" => 70up],
+            eye = Vec3f(260, -330, 230), lookat = Vec3f(0, -52, 35), kept = false, apart = true),
         AssemblyStep("Inserts into the right side plate",
-            "Lay the right side plate on the table, outer face down. Set the upper guide, both halves of the lower guide and the electronics carrier with its boards into its pockets.";
-            base = r"^side_plate_right$", new = [r"^(lower_guide_.|upper_guide|electronics_carrier|uln2003_drive|uln2003_exit|esp32|.*_clamp)$" => Vec3f(-150, 0, 0)],
+            "Lay the right side plate on the table, outer face down. Set the upper guide, the right half of the lower guide and the electronics carrier with its boards into its pockets.";
+            base = r"^side_plate_right$", new = [r"^(lower_guide_r|upper_guide|electronics_carrier|uln2003_drive|uln2003_exit|esp32|.*_clamp)$" => Vec3f(-150, 0, 0)],
+            moves = [r"^upper_guide$" => Vec3f(-150, 0, 0), r"^lower_guide_r$" => Vec3f(-150, 0, 0),
+                r"^(electronics_carrier|uln2003_drive|uln2003_exit|esp32|.*_clamp)$" => Vec3f(-150, 0, 0)],
             eye = Vec3f(-640, -420, 520), lookat = Vec3f(-90, -40, 60), up = lying),
-        AssemblyStep("Tie bars",
-            "Push the pad bar and the two tie bars into the square holes of the right side plate.";
-            new = [r"^(pad_bar|tie_bar_\d)$" => Vec3f(-150, 0, 0)],
-            eye = Vec3f(-760, -620, 600), lookat = Vec3f(-90, -30, 120), up = lying),
+        # On the table, apart from the frame: there nothing is in the way of the spring's head.
         AssemblyStep("Separation pad",
-            "Glue a 2 mm cork strip, cut lengthwise from a wine cork, onto the curved face of the pad spring's head. Slide the spring's root block from the front into the pocket of the pad bar, the head toward the front, and press the pad pin down through bar and block.";
-            new = [r"^(pad_spring|cork_strip)$" => 45 * dir(p.entry), r"^pad_pin$" => 30 * dir(left(p.entry))],
-            # From the open left side (the left plate is not on yet), so both moves lie in the picture.
-            eye = v(p.nip - Vec2d(25, 20)) + Vec3f(-420, 90, 110), lookat = v(p.nip - Vec2d(25, 20)) + Vec3f(-10, 0, 0)),
+            "Glue a 2 mm cork strip, cut lengthwise from a wine cork, onto the curved face of the pad spring's head. Slide the spring's root block into the open side of the pad bar's pocket, until the hole in the block lines up with the bar's hole, and press the pad pin through bar and block.";
+            base = r"^pad_bar$", new = [r"^(pad_spring|cork_strip)$" => 45 * dir(p.entry), r"^pad_pin$" => 30 * dir(left(p.entry))],
+            eye = bar + Vec3f(-360, 300, 260), lookat = bar, kept = false, apart = true),
+        AssemblyStep("Bars and the lower guide's left half",
+            "Push the pad bar with its spring, the head toward the front, and the two tie bars into the square holes of the right side plate. Then stand the left half of the lower guide end to end on the right half, its cut-out around the pad's head.";
+            new = [r"^(pad_bar|pad_spring|cork_strip|pad_pin)$" => Vec3f(-150, 0, 0), r"^tie_bar_\d$" => Vec3f(-150, 0, 0),
+                r"^lower_guide_l$" => Vec3f(-250, 0, 0)],
+            eye = Vec3f(-760, -620, 600), lookat = Vec3f(-90, -30, 120), up = lying),
         AssemblyStep("Left side plate",
             "Lower the left side plate onto all inserts and bars, so the tenons come through its square holes.";
             new = [r"^side_plate_left$" => Vec3f(-120, 0, 0)],
@@ -345,13 +356,13 @@ function assembly_steps(d::FeederDesign, b::Build)
             new = [r"^tray_leg$" => Vec3f(0, 0, -60)],
             eye = leg + Vec3f(420, -380, 160), lookat = leg),
         AssemblyStep("Feed roller",
-            "Hold the feed hub under the upper guide's front end, lift the pad with a finger and push the feed shaft in from the left through both plates and the hub. Snap a collar onto each side of the hub.";
-            base = r"^(feed_hub|feed_orings)$", new = [r"^feed_shaft$" => Vec3f(-300, 0, 0), r"^feed_collar_-?\d\d?$" => 25up],
+            "Hold the feed hub under the upper guide's front end with a collar beside it on each side, lift the pad with a finger and push the feed shaft in from the left through both plates, threading the collar, the hub and the other collar onto it. Turn each of them until its flat inside lines up with the shaft's flat.";
+            base = r"^(feed_hub|feed_orings|feed_collar_-?\d\d?)$", new = [r"^feed_shaft$" => Vec3f(-300, 0, 0)],
             eye = v(l.feed, -560) + Vec3f(0, -300, 220), lookat = v(l.feed, -60)),
         AssemblyStep("Pick arm and roller",
-            "Put an arm onto each end of the feed shaft, outside the plates, the left one with the boss for the idler. Hold the pick hub over the tray and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, the hub, the right plate's slot and the right arm. Snap its collars on beside the hub and outside the right arm, and one onto the feed shaft outside the right arm.";
-            base = r"^(pick_hub|pick_orings)$", new = [r"^arm_l$" => Vec3f(-60, 0, 0), r"^arm_r$" => Vec3f(60, 0, 0),
-                r"^pick_shaft$" => Vec3f(-320, 0, 0), r"^pick_collar_-?\d\d?$" => 25up, r"^(pick|feed)_collar_\d\d\d$" => Vec3f(40, 0, 0)],
+            "Put an arm onto each end of the feed shaft, outside the plates, the left one with the boss for the idler. Hold the pick hub over the tray with a collar beside it on each side and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, a collar, the hub, the other collar, the right plate's slot and the right arm. Push a collar onto the pick shaft's right end and one onto the feed shaft's right end, outside the right arm.";
+            base = r"^(pick_hub|pick_orings|pick_collar_-?\d\d?)$", new = [r"^arm_l$" => Vec3f(-60, 0, 0), r"^arm_r$" => Vec3f(60, 0, 0),
+                r"^pick_shaft$" => Vec3f(-320, 0, 0), r"^(pick|feed)_collar_\d\d\d$" => Vec3f(40, 0, 0)],
             eye = arm + Vec3f(-480, -420, 300), lookat = v(l.pick, -40)),
         AssemblyStep("Freewheels",
             "Push the pick ratchet onto the pick shaft's left end, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then its collar.";
@@ -363,14 +374,15 @@ function assembly_steps(d::FeederDesign, b::Build)
             new = [r"^idler_shaft$" => 70out, r"^idler$" => 110out, r"^idler_collar$" => 150out],
             eye = arm + Vec3f(-520, -160, 320), lookat = arm + Vec3f(-20, 20, 30)),
         AssemblyStep("Exit rollers",
-            "Push the driven exit shaft in from the right through both exit hubs; its right end stays flush with the plate. Push the idler shaft in from the left through its slots and both idler rollers. Snap on the collars, then press the two idler springs into the outer faces of the plates so they push the idler shaft up.";
-            base = r"^(exit_hub_\d|exit_\d_orings|exit_idler_\d|idler_\d_orings)$",
+            "Push the driven exit shaft in from the right through both exit hubs, threading a collar onto it on each side of each hub; its right end stays flush with the plate. Push a collar onto its left end, outside the left plate. Push the idler shaft in from the left through its slots, threading a collar just inside each plate and one on each side of each idler roller. Turn every collar and roller until its flat inside lines up with the shaft's flat. Then press the two idler springs into the outer faces of the plates so they push the idler shaft up.";
+            base = r"^(exit_hub_\d|exit_\d_orings|exit_idler_\d|idler_\d_orings|exit_drive_collar_-?\d+|exit_idle_collar_-?\d+)$",
             new = [r"^exit_drive_shaft$" => Vec3f(300, 0, 0), r"^exit_idle_shaft$" => Vec3f(-300, 0, 0),
-                r"^exit_(drive|idle)_collar" => 25up, r"^idler_spring_r$" => Vec3f(35, 0, 0), r"^idler_spring_l$" => Vec3f(-35, 0, 0)],
+                r"^exit_drive_collar_left$" => Vec3f(-40, 0, 0), r"^idler_spring_r$" => Vec3f(35, 0, 0), r"^idler_spring_l$" => Vec3f(-35, 0, 0)],
             eye = v(l.exit_up) + Vec3f(460, 420, 200), lookat = v(l.exit_up) + Vec3f(0, -20, -10)),
         AssemblyStep("Drive motor",
             "Push the pinion onto the drive motor's shaft. Pin the motor to its bracket with the two lug pins. Press the bracket's pegs into the left plate, the pinion's teeth into the feed cup gear; turn the pinion a little if a tooth sits on a tooth.";
             new = [r"^drive_pinion$" => 85out, r"^drive_bracket$" => 135out, r"^drive_motor$" => 175out, r"^drive_lug_pin_\d$" => 210out],
+            moves = [r"^drive_(pinion|bracket|motor|lug_pin_\d)$" => 60out],
             eye = gearbox + Vec3f(-480, 330, 280), lookat = gearbox + Vec3f(-90, 0, -10)),
         AssemblyStep("Exit motor",
             "Mount the exit motor straight onto the right plate: its shaft goes into the socket of the driven exit shaft, the lug pins into the plate.";
@@ -463,7 +475,7 @@ function framing(s::AssemblyStep, focus, context; fov, aspect, fill = 0.85, leas
     lookat, D = view_fit(s, focus; fov, aspect, fill)
     isempty(context) || (D = max(D, least * last(view_fit(s, vcat(focus, context); fov, aspect, fill))))
     eye = lookat + D * normalize(s.eye - s.lookat)
-    return AssemblyStep(s.title, s.text, s.base, s.new, eye, lookat, s.up, s.kept, s.leads)
+    return AssemblyStep(s.title, s.text, s.base, s.new, s.moves, eye, lookat, s.up, s.ground, s.kept, s.apart, s.leads)
 end
 
 "A tube of radius `r` along `points`, as a lead is drawn: a cylinder per segment and a ball at every bend."
@@ -509,7 +521,7 @@ function step_scene(s::AssemblyStep, shown, done, routes)
     for q in shown
         role, offset = step_role(s, q.name)
         if role == :none
-            q.name in done || continue
+            !s.apart && q.name in done || continue
             push!(drawn, (part = q, offset, own = false))
             append!(context, sample_points(q.mesh; n = 300))
             continue

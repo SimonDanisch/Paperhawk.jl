@@ -980,7 +980,9 @@ end
 
 The tie bar that carries the pad spring: a pocket the spring's root block slides into from the
 leaf's side, 0.6 mm deeper below for the wedge under the block, and a hole for the pin that
-holds it.
+holds it. The block's back wall ties the walls above and below the block into a channel that
+keeps the pad's force steady. Spring and bar go together on the table, before the bar goes
+into the frame: in the frame the lower guide's bed would be in the head's way.
 """
 function pad_bar!(d::FeederDesign, b::Build, l::Layout)
     p = l.profile

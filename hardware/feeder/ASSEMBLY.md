@@ -18,19 +18,19 @@ Lay each board into its pocket on the carrier, parts up, onto the shelves under 
 
 ## 3. Inserts into the right side plate
 
-Lay the right side plate on the table, outer face down. Set the upper guide, both halves of the lower guide and the electronics carrier with its boards into its pockets.
+Lay the right side plate on the table, outer face down. Set the upper guide, the right half of the lower guide and the electronics carrier with its boards into its pockets.
 
 ![Step 3](assembly/step_03.jpg)
 
-## 4. Tie bars
+## 4. Separation pad
 
-Push the pad bar and the two tie bars into the square holes of the right side plate.
+Glue a 2 mm cork strip, cut lengthwise from a wine cork, onto the curved face of the pad spring's head. Slide the spring's root block into the open side of the pad bar's pocket, until the hole in the block lines up with the bar's hole, and press the pad pin through bar and block.
 
 ![Step 4](assembly/step_04.jpg)
 
-## 5. Separation pad
+## 5. Bars and the lower guide's left half
 
-Glue a 2 mm cork strip, cut lengthwise from a wine cork, onto the curved face of the pad spring's head. Slide the spring's root block from the front into the pocket of the pad bar, the head toward the front, and press the pad pin down through bar and block.
+Push the pad bar with its spring, the head toward the front, and the two tie bars into the square holes of the right side plate. Then stand the left half of the lower guide end to end on the right half, its cut-out around the pad's head.
 
 ![Step 5](assembly/step_05.jpg)
 
@@ -60,13 +60,13 @@ Lift the tray's back end a little and set the stand under it, its two pegs into 
 
 ## 10. Feed roller
 
-Hold the feed hub under the upper guide's front end, lift the pad with a finger and push the feed shaft in from the left through both plates and the hub. Snap a collar onto each side of the hub.
+Hold the feed hub under the upper guide's front end with a collar beside it on each side, lift the pad with a finger and push the feed shaft in from the left through both plates, threading the collar, the hub and the other collar onto it. Turn each of them until its flat inside lines up with the shaft's flat.
 
 ![Step 10](assembly/step_10.jpg)
 
 ## 11. Pick arm and roller
 
-Put an arm onto each end of the feed shaft, outside the plates, the left one with the boss for the idler. Hold the pick hub over the tray and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, the hub, the right plate's slot and the right arm. Snap its collars on beside the hub and outside the right arm, and one onto the feed shaft outside the right arm.
+Put an arm onto each end of the feed shaft, outside the plates, the left one with the boss for the idler. Hold the pick hub over the tray with a collar beside it on each side and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, a collar, the hub, the other collar, the right plate's slot and the right arm. Push a collar onto the pick shaft's right end and one onto the feed shaft's right end, outside the right arm.
 
 ![Step 11](assembly/step_11.jpg)
 
@@ -84,7 +84,7 @@ Press the idler shaft into the D-hole of the left arm's top, slide the idler ont
 
 ## 14. Exit rollers
 
-Push the driven exit shaft in from the right through both exit hubs; its right end stays flush with the plate. Push the idler shaft in from the left through its slots and both idler rollers. Snap on the collars, then press the two idler springs into the outer faces of the plates so they push the idler shaft up.
+Push the driven exit shaft in from the right through both exit hubs, threading a collar onto it on each side of each hub; its right end stays flush with the plate. Push a collar onto its left end, outside the left plate. Push the idler shaft in from the left through its slots, threading a collar just inside each plate and one on each side of each idler roller. Turn every collar and roller until its flat inside lines up with the shaft's flat. Then press the two idler springs into the outer faces of the plates so they push the idler shaft up.
 
 ![Step 14](assembly/step_14.jpg)
 

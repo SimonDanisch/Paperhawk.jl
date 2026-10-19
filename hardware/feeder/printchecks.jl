@@ -138,6 +138,9 @@ function joints(d::FeederDesign, b::Build)
         push!(js, Joint("tray stand peg at x = $x in tray", "tray_leg", "tray", :slides, nothing, [x]; only = peg))
     end
     J("pad pin in pad bar", "pad_pin", "pad_bar", :holds, l.pad_bar, [-0.1])
+    # The root block slides into the pad bar's pocket; the pin passes the block freely.
+    J("pad spring root block in pad bar", "pad_spring", "pad_bar", :slides, nothing, [-14.0, -7.0, 5.0, 14.0])
+    J("pad pin through root block", "pad_pin", "pad_spring", :slides, nothing, [-1.0])
     return js
 end
 

@@ -197,8 +197,15 @@ at most 1.3° turned (the camera straightens it), inside a box 220 mm wide.
 The CAD checks build every part in place with OpenCASCADE: no two parts overlap except the
 intended press fits (O-rings in their grooves, pawl tips on the ratchets, lug pins, the pad pin,
 the clamp frames' pegs); the pick arm with everything it carries swings freely from an empty
-tray to a full one and 15 mm higher for loading; the lower exit roller can drop its full travel;
-every shaft slides in through the standing frame, the tray in along its pockets. The arm's
+tray to a full one and 15 mm higher for loading; the lower exit roller can drop its full travel.
+The feeder goes together in the order of [ASSEMBLY.md](ASSEMBLY.md): every part, moved in along
+its way at most 1.5 mm at a time, touches nothing already in place more than at its own place
+(where press fits overlap), except the O-rings, which stretch by 16 % over the hubs' lands
+(`sequence_check`). This check changed the order: the pad spring goes into the pad bar on the
+table, before the bar goes into the frame, because in the frame the lower guide's bed is in the
+head's way; and the collars beside the rollers are threaded onto their shafts as the shafts go
+in, because snapped on from the side their 5.4 mm slot would have to open by 4.6 mm, a strain
+of 2.7 %, more than PETG takes. The arm's
 parts weigh 86 g and press the pick roller on with 0.70 to 0.74 N, from a full to an empty
 tray. Each board and the room it needs (the parts on it, the motor plug, the jumper wires and
 their bends, the ESP32's USB-C plug and cable) is clear of every printed part, for the smallest

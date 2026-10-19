@@ -259,6 +259,97 @@ function insertion_check(d::FeederDesign = FeederDesign(), b::Build = Build(); r
     return results
 end
 
+"Smallest distance between the solids `a` and `b` (mm); 0 where they touch or overlap."
+gap(a, b) = minimum(occ().getDistance(i..., j...)[1] for i in a for j in b if i[1] == 3 && j[1] == 3)
+
+"""
+    box_window(box, other, u, L)
+
+The stretch of a move along `u` (from `L` before its place to its place) during which the
+moving bounding box `box` (taken at the place) meets `other`: `(near, far)`, or `nothing`.
+"""
+function box_window((lo, hi), (olo, ohi), u, L)
+    near, far = 0.0, L
+    for k in 1:3
+        # lo + t u ≤ ohi and olo ≤ hi + t u, for t in [0, L]
+        if abs(u[k]) < 1.0e-12
+            (lo[k] <= ohi[k] && olo[k] <= hi[k]) || return nothing
+        else
+            a, c = (ohi[k] - lo[k]) / u[k], (olo[k] - hi[k]) / u[k]
+            near, far = max(near, min(a, c)), min(far, max(a, c))
+        end
+    end
+    return near <= far ? (near, far) : nothing
+end
+
+"""
+    sequence_check(design, build; plan = assembly_steps(design, build), steps = all, step = 1.5, tolerance = 0.5)
+
+Builds the feeder in the order of the assembly guide (or another `plan`) and makes every move
+its steps name (`AssemblyStep.moves`): the items of a move come in along their way, from where
+it starts to their place, against everything already in place (earlier steps, the step's base
+items and the moves before it in the same step). Against each item in place the move is
+followed over the stretch where their bounding boxes meet, at most `step` mm at a time; where
+the two are farther apart than that it jumps ahead by their distance, which cannot hide a
+contact. A press fit overlaps its mate at its place; on the way it must never overlap more
+than there. Returns, per move, each item it hits with the largest overlap beyond the one at its
+place (mm³) and the distances before its place between which that happens (mm).
+"""
+function sequence_check(d::FeederDesign = FeederDesign(), b::Build = Build(); plan = assembly_steps(d, b), steps = nothing, step = 1.5,
+        tolerance = 0.5)
+    list = assembled(d, b)
+    done = Set{String}()
+    results = Pair{String, Vector{@NamedTuple{with::String, excess::Float64, from::Float64, to::Float64}}}[]
+    with_gmsh() do
+        for (k, s) in enumerate(plan)
+            if isnothing(steps) || k in steps
+                gmsh.model.add("sequence_$k")
+                placed = build_named!(list; keep = it -> (!s.apart && it.name in done) || occursin(s.base, it.name))
+                for (pattern, way) in s.moves
+                    group = [it for it in list if occursin(pattern, it.name) && !haskey(placed, it.name)]
+                    isempty(group) && continue
+                    solids = [it.build(true) for it in group]
+                    moving = reduce(vcat, solids)
+                    box = bounding_box(moving)
+                    L, u = norm(way), normalize(Vec3d(way))
+                    found = @NamedTuple{with::String, excess::Float64, from::Float64, to::Float64}[]
+                    for (n, tags) in placed
+                        window = box_window(box, bounding_box(tags), u, L)
+                        isnothing(window) && continue
+                        at_place = overlaps(box, bounding_box(tags)) ? shared(moving, tags) : 0.0
+                        worst, farthest, nearest = 0.0, 0.0, Inf
+                        position, t = 0.0, last(window)
+                        while true
+                            occ().translate(moving, ((t - position) * u)...)
+                            position = t
+                            distance = gap(moving, tags)
+                            if distance <= 1.0e-6
+                                excess = shared(moving, tags) - at_place
+                                if excess > tolerance
+                                    worst, farthest, nearest = max(worst, excess), max(farthest, t), min(nearest, t)
+                                end
+                            end
+                            t == first(window) && break
+                            t = max(first(window), t - max(distance, step))
+                        end
+                        occ().translate(moving, (-position * u)...)
+                        worst > 0 && push!(found, (with = n, excess = round(worst; digits = 1), from = round(farthest; digits = 1),
+                            to = round(nearest; digits = 1)))
+                    end
+                    for (it, tags) in zip(group, solids)
+                        placed[it.name] = tags
+                    end
+                    push!(results, "$k. $(s.title): $(join(getfield.(group, :name), ", "))" => sort!(found; by = h -> -h.excess))
+                    @info "sequence_check" last(results)
+                end
+                gmsh.model.remove()
+            end
+            s.kept && union!(done, [it.name for it in list if first(step_role(s, it.name)) != :none])
+        end
+    end
+    return results
+end
+
 "Mass (g) and center of mass (mm) of solids, at density `ρ` g/mm³."
 function mass_center(tags; ρ = 1.24e-3)
     m, c = 0.0, zeros(3)
