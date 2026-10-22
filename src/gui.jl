@@ -339,7 +339,8 @@ function A.scanner_gui(;camera=nothing,archive=nothing,dir=A.data_dir("scans","r
                     i=findfirst(w->w.x<=p[1]<=w.x+w.width && w.y<=p[2]<=w.y+w.height,e.words)
                     if i !== nothing
                         pause!(ui,true)
-                        wordindex[]=i;wordentry[]=e.id;wordrevision[]=e.revision;wordbox.displayed_string[]=e.words[i].text
+                        # Only shown, not stored: storing it would record an unchanged word as a correction.
+                        wordindex[]=i;wordentry[]=e.id;wordrevision[]=e.revision;wordbox.editor.arg1=e.words[i].text
                     end
                 end
             end
@@ -364,7 +365,7 @@ function A.scanner_gui(;camera=nothing,archive=nothing,dir=A.data_dir("scans","r
         word_wrap=true,halign=:left,fontsize=12,color=MUTED)
     button(footer[2,2],:search,"Suchen",()->begin
         archive===nothing && throw(ArgumentError("Kein Archiv verbunden"))
-        rows=search_documents(archive,query.displayed_string[];limit=3)
+        rows=search_documents(archive,query.editor.arg1[];limit=3)
         found.text[]=isempty(rows) ? "Keine Treffer" : join(["Nr. $(r["number"]) · $(first(r["title"],45))" for r in rows],"   /   ")
     end)
     colsize!(footer,1,Fixed(260));colsize!(footer,2,Fixed(85));colsize!(footer,3,Auto(1))

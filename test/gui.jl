@@ -83,7 +83,7 @@ end
             end
             sleep(0.3)
             click_image((30,20))
-            @test wordbox.displayed_string[]=="Rechnung"
+            @test wordbox.editor.arg1[]=="Rechnung" && wordbox.stored_string[]===nothing
             wordbox.stored_string[]="Rechnung korrigiert"
             @test only(only(draft.entries).words).text=="Rechnung korrigiert"
             click(:undo)
@@ -117,6 +117,10 @@ end
             @test timedwait(()->startswith(ui.message[],"Archiviert:") || startswith(ui.message[],"Fehler:"),15)==:ok
             @test startswith(ui.message[],"Archiviert:")
             @test only(search_documents(archive,"Rechnung"))["number"]==1
+            query=only(filter(x->x isa Textbox && occursin("durchsuchen",x.placeholder[]),ui.figure.content))
+            found=only(filter(x->x isa Label && startswith(x.text[],"Suche liefert"),ui.figure.content))
+            query.editor.arg1="Rechnung";click(:search)
+            @test startswith(found.text[],"Nr. 1 ·")
             click(:delete)
             @test startswith(ui.message[],"Fehler:") && length(draft.entries)==1
         finally
