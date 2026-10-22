@@ -7,44 +7,85 @@ authors = ["Simon Danisch <sdanisch@gmail.com>"]
 projects = ["test"]
 
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 BonsaiRunner = "f8e6003a-513a-4f5e-98bb-1b2c050ff941"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+CompilerCaching = "9db33cc3-5358-4881-8759-fa4194144afd"
+ComputePipeline = "95dc2771-c249-4cd0-9c9f-1f3b4330693c"
 DBInterface = "a10d1c49-ce27-4219-8d33-6db1a4562965"
+DNNKernels = "b7e4a0c2-3f51-4d8e-9a1b-6c2d5e8f7a30"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 FFMPEG_jll = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
 FileWatching = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+GPUArrays = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
 GPUFiltering = "0d8d4a14-6fb1-4aec-8b08-0f10adea08ad"
 GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 Gmsh = "705231aa-382f-11e9-3f0c-b7cb4346fdeb"
+Hikari = "afc56b53-c9a9-482a-a956-d1d800e05558"
 ImageCore = "a09fc81d-aa75-5fe9-8630-4744c3626534"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 JpegTurbo = "b835a17e-a41a-41e7-81f0-2f016b05efe0"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+KernelInterface = "4ee993da-d684-4d17-a7dd-4e58e78d92bf"
+Lava = "3a680b1f-cb25-4bee-9cf7-bc880b76dc8c"
 LibGEOS = "a90b1aa1-3769-5649-ba7e-abc5a9d163eb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
 Mantle = "8f4c1f2e-6a3d-4b71-9c05-2e7d8a1b6f34"
+Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 MuJoCo = "1c101251-5e0f-4746-b44c-0728d433b68a"
 PNGFiles = "f57f5aa1-a3ce-4bc8-8ab9-96f992907883"
 PPDocLayoutRunner = "af74545c-bb7d-41de-988c-5d37636a6f7a"
 PPOCRRunner = "e16c7811-b8c1-4791-91d8-75b683fe5914"
 Packing = "19eb6ba3-879d-56ad-ad62-d5c202156566"
+PrintSim = "f01d4bda-9367-4b24-b59d-fdacb335a46e"
+RayMakie = "70852e3a-d594-4041-8350-783a02753e02"
+Raycore = "afc56b53-c9a9-482a-a956-d1d800e05559"
 SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 SQLite = "0aa819cd-b072-5ff4-a722-6bc24af294d9"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 UVDocRunner = "7c6dc493-cef7-40e2-b25f-97e481222d57"
+Vulkan = "9f14b124-c50e-4008-a7d4-969b3a6cd68a"
+VulkanCore = "16167f82-ea26-5cba-b1de-ed6fd5e30a11"
 ZipArchives = "49080126-0e18-4c2a-b176-c102e4b3760c"
 
+[sources]
+BonsaiRunner = {path = "dev/JuliaVision/BonsaiRunner"}
+CompilerCaching = {path = "dev/CompilerCaching"}
+ComputePipeline = {rev = "sd/lava-refactor", subdir = "ComputePipeline", url = "https://github.com/MakieOrg/Makie.jl"}
+DNNKernels = {path = "dev/JuliaVision/DNNKernels"}
+GLMakie = {rev = "sd/lava-refactor", subdir = "GLMakie", url = "https://github.com/MakieOrg/Makie.jl"}
+GPUArrays = {path = "dev/GPUArrays"}
+GPUFiltering = {path = "dev/JuliaVision/GPUFiltering"}
+KernelAbstractions = {path = "dev/KernelAbstractions"}
+KernelInterface = {path = "dev/KernelAbstractions/lib/KernelInterface"}
+Lava = {path = "dev/Lava"}
+Makie = {rev = "sd/lava-refactor", subdir = "Makie", url = "https://github.com/MakieOrg/Makie.jl"}
+Mantle = {path = "dev/Mantle"}
+Metal = {path = "dev/Metal"}
+PPDocLayoutRunner = {path = "dev/JuliaVision/PPDocLayoutRunner"}
+PPOCRRunner = {path = "dev/JuliaVision/PPOCRRunner"}
+PrintSim = {path = "dev/PrintSim"}
+RayMakie = {rev = "sd/lava-refactor", subdir = "RayMakie", url = "https://github.com/MakieOrg/Makie.jl"}
+Raycore = {path = "dev/Raycore"}
+UVDocRunner = {path = "dev/JuliaVision/UVDocRunner"}
+Vulkan = {path = "dev/Vulkan"}
+VulkanCore = {path = "dev/VulkanCore"}
+
 [compat]
+Adapt = "4.7.4"
 CodecZlib = "0.7.9"
 DBInterface = "2.7.0"
 Dates = "1.11.0"
 FFMPEG_jll = "9.0.2"
-GLMakie = "0.13.15"
+GLMakie = "0.13.15, 0.14"
 GeometryBasics = "0.5.13"
 Gmsh = "0.3.1"
+Hikari = "0.1.0"
 ImageCore = "0.10.5"
 JSON3 = "1.14.3"
 JpegTurbo = "0.1.6"

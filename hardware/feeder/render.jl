@@ -261,38 +261,6 @@ end
 # --- illustrated assembly instructions ------------------------------------------------------------
 
 """
-One assembly step: what it shows and says. `base` matches items shown in place and in color,
-`new` pairs a name pattern with the offset (mm) the items are pulled out along their way in.
-Items of earlier steps are toned down; with `apart` the step is done on the table, apart from
-what was built so far, and shows and moves only its own items. The camera looks from `eye`
-toward `lookat`, which picture frames itself along that direction (`framing`), with `up` up. `ground` is the real up
-direction while the step is done, what the table lies across: `-x` while the frame lies on
-its right plate. `moves` are the moves the hands make, in order, each a name pattern with the
-way the items come in (`sequence_check` follows them): by default `new`, but parts that go in
-together as one unit move as one. With `kept = false` the step only prepares parts (O-rings
-onto hubs), which then show up in later pictures only once a step builds them in. `leads`
-names the motors whose leads the picture draws, as `cable_routes` lays them.
-"""
-struct AssemblyStep
-    title::String
-    text::String
-    base::Regex
-    new::Vector{Pair{Regex, Vec3f}}
-    moves::Vector{Pair{Regex, Vec3f}}
-    eye::Vec3f
-    lookat::Vec3f
-    up::Vec3f
-    ground::Vec3f
-    kept::Bool
-    apart::Bool
-    leads::Vector{String}
-end
-
-AssemblyStep(title, text; base = r"^$", new = Pair{Regex, Vec3f}[], moves = new, eye, lookat, up = Vec3f(0, 0, 1), ground = up,
-    kept = true, apart = false, leads = String[]) =
-    AssemblyStep(title, text, base, new, moves, Vec3f(eye), Vec3f(lookat), Vec3f(up), Vec3f(ground), kept, apart, leads)
-
-"""
     assembly_steps(design, build)
 
 The assembly order with a camera for each step. Coordinates: x across the sheet (the gearbox
@@ -314,6 +282,9 @@ function assembly_steps(d::FeederDesign, b::Build)
     bar = v(l.pad_bar)
     arm = v(l.pick, -o - 10)
     leg = v(along(p, -d.tray_length + TRAY_LEG.at, -40.0))
+    # Clips come from the side away from their mouth, 40 mm out.
+    cs = clips(d, b, l)
+    clipped(rx) = [Regex("^$(c.name)\$") => -40 * dir(c.mouth) for c in cs if occursin(rx, c.name)]
     return [
         AssemblyStep("Fit the O-rings",
             "Stretch three O-rings into the grooves of the pick hub and of the feed hub, and two onto each exit hub and each idler roller.";
@@ -345,7 +316,8 @@ function assembly_steps(d::FeederDesign, b::Build)
             eye = Vec3f(-620, -520, 420), lookat = Vec3f(-60, -60, 120), up = lying),
         AssemblyStep("Wedges",
             "Stand the frame up. Drive a wedge through the slot of every tenon, six in all, until both plates sit tight on the bars' shoulders.";
-            new = [r"^wedge_" => Vec3f(0, -75, 0)],
+            # Shown well out; a wedge goes in from where its tip meets the slot, 15 mm out.
+            new = [r"^wedge_" => Vec3f(0, -75, 0)], moves = [r"^wedge_" => Vec3f(0, -40, 0)],
             eye = Vec3f(560, -380, 320), lookat = Vec3f(60, -50, 80)),
         AssemblyStep("Tray",
             "Slide the tray in from the back, face up, its edges in the long pockets of both plates, until its ramp stops against the pockets' front ends.";
@@ -356,33 +328,33 @@ function assembly_steps(d::FeederDesign, b::Build)
             new = [r"^tray_leg$" => Vec3f(0, 0, -60)],
             eye = leg + Vec3f(420, -380, 160), lookat = leg),
         AssemblyStep("Feed roller",
-            "Hold the feed hub under the upper guide's front end with a collar beside it on each side, lift the pad with a finger and push the feed shaft in from the left through both plates, threading the collar, the hub and the other collar onto it. Turn each of them until its flat inside lines up with the shaft's flat.";
-            base = r"^(feed_hub|feed_orings|feed_collar_-?\d\d?)$", new = [r"^feed_shaft$" => Vec3f(-300, 0, 0)],
+            "Hold the feed hub under the upper guide's front end, lift the pad with a finger and push the feed shaft in from the left through both plates and the hub, the hub's flat inside lined up with the shaft's flat. Slide the hub between the two grooves near the shaft's middle and push a clip into each, beside the hub: a clip goes on sideways, open side first, and clicks into its groove.";
+            base = r"^(feed_hub|feed_orings)$", new = [r"^feed_shaft$" => Vec3f(-300, 0, 0); clipped(r"^feed_clip_-?\d\d?$")],
             eye = v(l.feed, -560) + Vec3f(0, -300, 220), lookat = v(l.feed, -60)),
         AssemblyStep("Pick arm and roller",
-            "Put an arm onto each end of the feed shaft, outside the plates, the left one with the boss for the idler. Hold the pick hub over the tray with a collar beside it on each side and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, a collar, the hub, the other collar, the right plate's slot and the right arm. Push a collar onto the pick shaft's right end and one onto the feed shaft's right end, outside the right arm.";
-            base = r"^(pick_hub|pick_orings|pick_collar_-?\d\d?)$", new = [r"^arm_l$" => Vec3f(-60, 0, 0), r"^arm_r$" => Vec3f(60, 0, 0),
-                r"^pick_shaft$" => Vec3f(-320, 0, 0), r"^(pick|feed)_collar_\d\d\d$" => Vec3f(40, 0, 0)],
+            "Put an arm onto each end of the feed shaft, outside the plates, the left one with the post for the idler. Hold the pick hub over the tray and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, the hub, the right plate's slot and the right arm. Slide the hub, its flat lined up with the shaft's, between the two grooves near the shaft's middle and push a clip into each, beside the hub. Push a clip into the groove of the pick shaft and of the feed shaft outside the right arm.";
+            base = r"^(pick_hub|pick_orings)$", new = [r"^arm_l$" => Vec3f(-60, 0, 0); r"^arm_r$" => Vec3f(60, 0, 0);
+                r"^pick_shaft$" => Vec3f(-320, 0, 0); clipped(r"^pick_clip_-?\d\d?$"); clipped(r"^(pick|feed)_clip_\d\d\d$")],
             eye = arm + Vec3f(-480, -420, 300), lookat = v(l.pick, -40)),
         AssemblyStep("Freewheels",
-            "Push the pick ratchet onto the pick shaft's left end, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then its collar. The pick cup gear needs no collar of its own: the feed cup gear covers its outer face and keeps it on its shaft with 0.5 mm of play.";
-            new = [r"^pick_ratchet$" => 40out, r"^pick_cup_gear$" => 80out, r"^feed_ratchet$" => 70out, r"^feed_cup_gear$" => 110out,
-                r"^feed_collar_out$" => 150out],
+            "Push the pick ratchet onto the pick shaft's left end, its flat lined up with the shaft's, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then a clip into the groove outside it. The pick cup gear needs no clip of its own: the feed cup gear covers its outer face and keeps it on its shaft with 0.5 mm of play.";
+            new = [r"^pick_ratchet$" => 40out; r"^pick_cup_gear$" => 80out; r"^feed_ratchet$" => 70out; r"^feed_cup_gear$" => 110out;
+                clipped(r"^feed_clip_out$")],
             eye = arm + Vec3f(-520, -260, 240), lookat = arm + Vec3f(-20, 20, 0)),
         AssemblyStep("Idler",
-            "Press the idler shaft into the D-hole of the left arm's top, slide the idler onto it until its teeth mesh both cup gears (turn it a little if a tooth sits on a tooth) and snap on its collar.";
-            new = [r"^idler_shaft$" => 70out, r"^idler$" => 110out, r"^idler_collar$" => 150out],
+            "Slide the idler onto the left arm's post until its teeth mesh both cup gears (turn it a little if a tooth sits on a tooth) and push a clip into the groove at the post's end.";
+            new = [r"^idler$" => 110out; clipped(r"^idler_clip$")],
             eye = arm + Vec3f(-520, -160, 320), lookat = arm + Vec3f(-20, 20, 30)),
         AssemblyStep("Exit rollers",
-            "Push the driven exit shaft in from the right through both exit hubs, threading a collar onto it on each side of each hub; its right end stays flush with the plate. Push a collar onto its left end, outside the left plate. Push the idler shaft in from the left through its slots, threading a collar just inside each plate and one on each side of each idler roller. Turn every collar and roller until its flat inside lines up with the shaft's flat. Then press the two idler springs into the outer faces of the plates so they push the idler shaft up.";
-            base = r"^(exit_hub_\d|exit_\d_orings|exit_idler_\d|idler_\d_orings|exit_drive_collar_-?\d+|exit_idle_collar_-?\d+)$",
-            new = [r"^exit_drive_shaft$" => Vec3f(300, 0, 0), r"^exit_idle_shaft$" => Vec3f(-300, 0, 0),
-                r"^exit_drive_collar_left$" => Vec3f(-40, 0, 0), r"^idler_spring_r$" => Vec3f(35, 0, 0), r"^idler_spring_l$" => Vec3f(-35, 0, 0)],
+            "Push the driven exit shaft in from the right through both plates and both exit hubs, each hub's flat lined up with the shaft's; its right end stays flush with the plate. Slide each hub between its two grooves and push a clip into each, beside the hub, then a clip into the groove just inside the left plate and one into the groove outside it. Push the idler shaft in from the left through its slots and both idler rollers the same way; its clips go on from the front, beside each roller and just inside each plate. Then press the two idler springs into the outer faces of the plates so they push the idler shaft up.";
+            base = r"^(exit_hub_\d|exit_\d_orings|exit_idler_\d|idler_\d_orings)$",
+            new = [r"^exit_drive_shaft$" => Vec3f(300, 0, 0); r"^exit_idle_shaft$" => Vec3f(-300, 0, 0); clipped(r"^exit_(drive|idle)_clip_");
+                r"^idler_spring_r$" => Vec3f(35, 0, 0); r"^idler_spring_l$" => Vec3f(-35, 0, 0)],
             eye = v(l.exit_up) + Vec3f(460, 420, 200), lookat = v(l.exit_up) + Vec3f(0, -20, -10)),
         AssemblyStep("Drive motor",
-            "Push the pinion onto the drive motor's shaft. Pin the motor to its bracket with the two lug pins. Press the bracket's pegs into the left plate, the pinion's teeth into the feed cup gear; turn the pinion a little if a tooth sits on a tooth.";
-            new = [r"^drive_pinion$" => 85out, r"^drive_bracket$" => 135out, r"^drive_motor$" => 175out, r"^drive_lug_pin_\d$" => 210out],
-            moves = [r"^drive_(pinion|bracket|motor|lug_pin_\d)$" => 60out],
+            "Press the pinion stop's peg into its hole in the left plate, beside the feed cup gear. Push the pinion onto the drive motor's shaft, its flat inside lined up with the shaft's flats. Pin the motor to its bracket with the two lug pins. Press the bracket's pegs into the left plate, the pinion's teeth into the feed cup gear; turn the pinion a little if a tooth sits on a tooth. The stop keeps the pinion on the motor's shaft.";
+            new = [r"^pinion_stop$" => 45out, r"^drive_pinion$" => 85out, r"^drive_bracket$" => 135out, r"^drive_motor$" => 175out, r"^drive_lug_pin_\d$" => 210out],
+            moves = [r"^pinion_stop$" => 45out, r"^drive_(pinion|bracket|motor|lug_pin_\d)$" => 60out],
             eye = gearbox + Vec3f(-480, 330, 280), lookat = gearbox + Vec3f(-90, 0, -10)),
         AssemblyStep("Exit motor",
             "Mount the exit motor straight onto the right plate: its shaft goes into the socket of the driven exit shaft, the lug pins into the plate.";
@@ -400,164 +372,6 @@ function assembly_steps(d::FeederDesign, b::Build)
     ]
 end
 
-"Pulls `name`'s offset out of a step: base items stay, new items move by their pattern's offset."
-function step_role(s::AssemblyStep, name)
-    occursin(s.base, name) && return :base, Vec3f(0)
-    for (pattern, offset) in s.new
-        occursin(pattern, name) && return :new, offset
-    end
-    return :none, Vec3f(0)
-end
-
-"""
-    insertion_arrow(mesh, offset; gap = 4, shortest = 20, longest = 70)
-
-Where the arrow for a part pulled out by `offset` goes: from the part's leading face (the one
-that moves first on the way in) toward where that face ends up. Where that leaves no room for
-an arrow `shortest` mm long (its 10 mm tip and some shaft), the arrow pushes the part from
-behind instead. Returns start point and direction.
-"""
-function insertion_arrow(m::GeometryBasics.Mesh, offset::Vec3f; gap = 4.0f0, shortest = 20.0f0, longest = 70.0f0)
-    L = norm(offset)
-    u = offset / L                                     # the way out; the part goes in along -u
-    pts = coordinates(m)
-    along = [dot(Vec3f(q), u) for q in pts]
-    lo, hi = extrema(along)
-    c = Vec3f(sum(pts) / length(pts))
-    side = c - dot(c, u) * u                           # the centroid's position across the way in
-    free = L - (hi - lo)                               # empty way between the pulled-out part and its place
-    if free - 2gap >= shortest
-        len = min(free - 2gap, longest)
-        start = side + (lo + L - gap) * u              # just off the leading face, toward the place
-        return start, -len * u
-    else
-        len = clamp(L / 2, shortest, longest)
-        start = side + (hi + L + gap + len) * u        # behind the trailing face, pushing
-        return start, -len * u
-    end
-end
-
-"Up to `n` of mesh `m`'s vertices, moved by `offset`."
-sample_points(m::GeometryBasics.Mesh, offset = Vec3f(0); n = 3000) =
-    [Vec3f(q) + offset for q in coordinates(m)[1:max(1, length(coordinates(m)) ÷ n):end]]
-
-"""
-    view_fit(s, points; fov, aspect, fill)
-
-Look-at point and eye distance that keep step `s`'s viewing direction and up and fit `points`
-into the middle `fill` of the picture (`fov` vertical in degrees, `aspect` width over height):
-the look-at point moves until the points' projection is centered, the eye as close as it may.
-"""
-function view_fit(s::AssemblyStep, points; fov, aspect, fill)
-    back = normalize(s.eye - s.lookat)
-    right = normalize(cross(-back, s.up))
-    up = cross(right, -back)
-    ty = Float32(tand(fov / 2) * fill)
-    tx = ty * Float32(aspect)
-    fit(lookat) = maximum(max(abs(dot(q - lookat, right)) / tx, abs(dot(q - lookat, up)) / ty) + dot(q - lookat, back) for q in points)
-    lookat = sum(points) / length(points)
-    for _ in 1:8
-        D = fit(lookat)
-        xs = extrema(dot(q - lookat, right) / ((D - dot(q - lookat, back)) * tx) for q in points)
-        ys = extrema(dot(q - lookat, up) / ((D - dot(q - lookat, back)) * ty) for q in points)
-        lookat += D * (sum(xs) / 2 * tx * right + sum(ys) / 2 * ty * up)
-    end
-    return lookat, fit(lookat)
-end
-
-"""
-    framing(s, focus, context; fov, aspect, fill = 0.85, least = 0.65)
-
-Step `s` with its eye and look-at point set for the picture: centered on the `focus` points
-and close enough to fill the picture with them, but at least `least` of the distance that
-shows `focus` and `context` together, so a close-up still shows where it is on the feeder.
-"""
-function framing(s::AssemblyStep, focus, context; fov, aspect, fill = 0.85, least = 0.65)
-    lookat, D = view_fit(s, focus; fov, aspect, fill)
-    isempty(context) || (D = max(D, least * last(view_fit(s, vcat(focus, context); fov, aspect, fill))))
-    eye = lookat + D * normalize(s.eye - s.lookat)
-    return AssemblyStep(s.title, s.text, s.base, s.new, s.moves, eye, lookat, s.up, s.ground, s.kept, s.apart, s.leads)
-end
-
-"A tube of radius `r` along `points`, as a lead is drawn: a cylinder per segment and a ball at every bend."
-function tube(points, r)
-    segments = [normal_mesh(Cylinder(Point3f(p), Point3f(q), Float32(r))) for (p, q) in zip(points[1:(end - 1)], points[2:end])]
-    bends = [normal_mesh(Sphere(Point3f(p), Float32(r))) for p in points[2:(end - 1)]]
-    return merge(vcat(segments, bends))
-end
-
-"An arrow from `start` along `v` as one mesh: a shaft of radius `shaft`, a cone `tip` long with radius `head`."
-function arrow_mesh(start, v; shaft = 1.4f0, head = 3.6f0, tip = 10.0f0, n = 32)
-    L = norm(v)
-    u = Vec3f(v / L)
-    base = Point3f(start + (L - tip) * u)
-    a = normalize(cross(u, abs(u[3]) < 0.9f0 ? Vec3f(0, 0, 1) : Vec3f(1, 0, 0)))
-    b = cross(u, a)
-    ring = [Point3f(base + head * (cos(φ) * a + sin(φ) * b)) for φ in range(0, 2π; length = n + 1)[1:n]]
-    points = vcat(ring, [Point3f(start + v), base])
-    faces = vcat([GLTriangleFace(i, mod1(i + 1, n), n + 1) for i in 1:n], [GLTriangleFace(mod1(i + 1, n), i, n + 2) for i in 1:n])
-    cone = GeometryBasics.Mesh(points, faces; normal = GeometryBasics.normals(points, faces))
-    return merge([normal_mesh(Cylinder(Point3f(start), base, Float32(shaft))), cone])
-end
-
 "The parts that go into the feeder: all but the fit coupon and the spare pad springs."
-assembled(ps) = filter(q -> !occursin(r"^(coupon|coupon_shaft|pad_spring_\d)", q.name), ps)
+assembled(ps) = filter(q -> !occursin(r"^(coupon.*|pad_spring_\d)", q.name), ps)
 
-"The names of the items step `s` builds in."
-step_items(s::AssemblyStep, shown) = [q.name for q in shown if first(step_role(s, q.name)) != :none]
-
-"""
-    step_scene(s, shown, done, routes)
-
-What the picture of step `s` holds, independent of how it is drawn: `drawn` parts, each with its
-offset and whether it belongs to the step (`own`) or an earlier step built it in (`done`);
-`arrows` and `leads` as meshes; the points the camera frames (`focus`: the step's parts where
-they are drawn and where they go, the arrows, each lead with its motor and driver board) and
-the points it keeps partly in view (`context`: what was built before).
-"""
-function step_scene(s::AssemblyStep, shown, done, routes)
-    drawn = @NamedTuple{part::Part, offset::Vec3f, own::Bool}[]
-    arrows = GeometryBasics.Mesh[]
-    focus, context = Vec3f[], Vec3f[]
-    for q in shown
-        role, offset = step_role(s, q.name)
-        if role == :none
-            !s.apart && q.name in done || continue
-            push!(drawn, (part = q, offset, own = false))
-            append!(context, sample_points(q.mesh; n = 300))
-            continue
-        end
-        push!(drawn, (part = q, offset, own = true))
-        append!(focus, sample_points(q.mesh, offset))
-        if offset != Vec3f(0)
-            append!(focus, sample_points(q.mesh))
-            push!(arrows, arrow_mesh(insertion_arrow(q.mesh, offset)...))
-        end
-    end
-    foreach(a -> append!(focus, sample_points(a)), arrows)
-    leads = GeometryBasics.Mesh[]
-    for r in routes
-        r.motor in s.leads || continue
-        push!(leads, tube(r.points, 2.5))
-        append!(focus, Vec3f.(r.points))
-        for q in shown
-            q.name in ("$(r.motor)_motor", r.board) && append!(focus, sample_points(q.mesh))
-        end
-    end
-    return (; drawn, arrows, leads, focus, context)
-end
-
-function write_assembly_markdown(path, steps, images)
-    open(path, "w") do io
-        println(io, "# Assembling the sheet feeder\n")
-        println(io, "In each picture the parts of that step are in full color, pulled out along the way they go")
-        println(io, "in, with a red arrow to where they go; parts from earlier steps are paler. Wiring and the")
-        println(io, "first start: [ELECTRONICS.md](ELECTRONICS.md). Back to the [overview](README.md).\n")
-        for (k, (s, img)) in enumerate(zip(steps, images))
-            println(io, "## $k. $(s.title)\n")
-            println(io, s.text, "\n")
-            println(io, "![Step $k]($(relpath(img, dirname(path))))\n")
-        end
-    end
-    return path
-end

@@ -3,15 +3,6 @@
 # a shaft turned through a full circle in its printed bore, the pinion rolled against both cup
 # gears, the ratchet turned under its pawl, pegs and feet checked for material around them.
 
-"A region turned by `θ` about `c` in the profile plane."
-function turned(g, c::Point2d, θ)
-    s, k = sincos(θ)
-    return map_region(g, v -> [c[1] + k * (v[1] - c[1]) - s * (v[2] - c[2]), c[2] + s * (v[1] - c[1]) + k * (v[2] - c[2])])
-end
-
-overlap(a, b) = GEOS.area(GEOS.intersection(a, b))
-gap(a, b) = GEOS.distance(a, b)
-
 "Cross section of a 28BYJ-48's shaft (bought, as drawn): 5 mm round with flats 3 mm apart."
 function motor_shaft_section(c::Point2d; n = 48)
     r, f = BYJ48.shaft / 2, BYJ48.flats / 2
@@ -20,42 +11,9 @@ function motor_shaft_section(c::Point2d; n = 48)
     return GEOS.Polygon([[[q[1], q[2]] for q in vcat(pts, pts[1:1])]])
 end
 
-"""
-A bought part where it meets a printed one, as its drawing gives it: `region(x, axis)` is its
-cross section at `x` in the profile plane. It does not shrink or drift.
-"""
-struct BoughtSection{F}
-    name::String
-    region::F
-end
-
 "The motor shaft's flattened part, and its round part next to the motor (Ø5, up to 4.7 mm out)."
 const MOTOR_SHAFT = BoughtSection("motor shaft", (x, axis) -> motor_shaft_section(axis))
 const MOTOR_SHAFT_ROUND = BoughtSection("motor shaft, round part", (x, axis) -> disk(axis, BYJ48.shaft / 2))
-
-"""
-A place where two parts meet, cut at the planes `xs`. Both parts are lined up where they meet:
-at `axis`, or without one at the middle of the moving part's cut. `kind` says what it has to do:
-
-- `:turns`: `moving` turns about `axis` in `host` and must not touch it at any angle;
-- `:holds`: a clamp or press fit, `moving` must overlap `host` a little;
-- `:slides`: `moving` goes into `host` and must not overlap it;
-- `:sits`: a peg or pin, `moving` needs `host` material all around it;
-- `:rests`: a foot or block on a face, `moving` (cut at `xs`) needs `host` (cut at `host_xs`)
-  under all of it.
-"""
-struct Joint
-    name::String
-    moving::Union{String, BoughtSection}
-    host::Union{String, BoughtSection}
-    kind::Symbol
-    axis::Union{Point2d, Nothing}
-    xs::Vector{Float64}
-    host_xs::Vector{Float64}
-    only::Union{Vector{Point2d}, Nothing}   # the part of the moving section that counts, if not all of it
-end
-Joint(name, moving, host, kind, axis, xs; only = nothing) = Joint(name, moving, host, kind, axis, xs, xs, only)
-Joint(name, moving, host, kind, axis, xs, host_xs) = Joint(name, moving, host, kind, axis, xs, host_xs, nothing)
 
 """
     joints(d, b)
@@ -76,16 +34,15 @@ function joints(d::FeederDesign, b::Build)
         J("$shaft in left plate", shaft, "side_plate_left", :turns, c, inL)
         J("$shaft in right plate", shaft, "side_plate_right", :turns, c, inR)
     end
-    # The pick arm: its hubs turn on the feed shaft, the pick shaft turns in it, the idler's shaft
-    # is clamped in the left arm and the idler turns on it.
+    # The pick arm: its hubs turn on the feed shaft, the pick shaft turns in it, the idler turns on
+    # the left arm's post.
     armL, armR = [left_x(d, b, G.arm[1] + 1.1), left_x(d, b, G.arm[2] - 1.1)], [o + G.arm[1] + 1.1, o + G.arm[2] - 1.1]
     I = idler_center(g, l.feed, l.pick)
     J("left arm on feed shaft", "arm_l", "feed_shaft", :turns, l.feed, armL)
     J("right arm on feed shaft", "arm_r", "feed_shaft", :turns, l.feed, armR)
     J("pick shaft in left arm", "pick_shaft", "arm_l", :turns, l.pick, armL)
     J("pick shaft in right arm", "pick_shaft", "arm_r", :turns, l.pick, armR)
-    J("idler shaft in left arm", "idler_shaft", "arm_l", :holds, I, armL)
-    J("idler on its shaft", "idler", "idler_shaft", :turns, I, [left_x(d, b, G.idler[1] + 2.1), left_x(d, b, G.idler[2] - 2.1)])
+    J("idler on the left arm's post", "idler", "arm_l", :turns, I, [left_x(d, b, G.idler[1] + 2.1), left_x(d, b, G.idler[2] - 2.1)])
     # Cup gears turn on their shafts over their base and hub, the last 6.5 mm away from the plate.
     for (name, c, u) in (("feed", l.feed, G.feed), ("pick", l.pick, G.pick))
         J("$name cup gear on $(name) shaft", "$(name)_cup_gear", "$(name)_shaft", :turns, c, [left_x(d, b, u + 7.6), left_x(d, b, u + 12.9)])
@@ -96,9 +53,9 @@ function joints(d::FeederDesign, b::Build)
     # it cools. The flat part holds from 6 to 9 mm out (the shortest shaft ends at 9.5).
     # Planes are given as distance s from the motor's face.
     mface = -(o + G.face)
-    J("pinion on motor shaft", "drive_pinion", MOTOR_SHAFT, :holds, g.motor, [mface + 6.0, mface + 7.5, mface + 9.0])
+    J("pinion on motor shaft", "drive_pinion", MOTOR_SHAFT, :keyed, g.motor, [mface + 6.0, mface + 7.5, mface + 9.0])
     J("pinion clear of the motor shaft's round part", "drive_pinion", MOTOR_SHAFT_ROUND, :slides, g.motor, [mface + 4.45])
-    J("exit shaft socket on motor shaft", "exit_drive_shaft", MOTOR_SHAFT, :holds, l.exit_up, [o - 6.0, o - 7.5, o - 9.0])
+    J("exit shaft socket on motor shaft", "exit_drive_shaft", MOTOR_SHAFT, :keyed, l.exit_up, [o - 6.0, o - 7.5, o - 9.0])
     J("exit shaft socket clear of the round part", "exit_drive_shaft", MOTOR_SHAFT_ROUND, :slides, l.exit_up, [o - 2.5, o - 4.5])
     for (hub, shaft, c, xs) in (("pick_hub", "pick_shaft", l.pick, [-10.1, 9.9]), ("feed_hub", "feed_shaft", l.feed, [-10.1, 9.9]),
             ("exit_hub_1", "exit_drive_shaft", l.exit_up, [b.exit_rollers[1] - 4.1, b.exit_rollers[1] + 3.9]),
@@ -107,7 +64,7 @@ function joints(d::FeederDesign, b::Build)
             ("exit_idler_2", "exit_idle_shaft", l.exit_low, [b.exit_rollers[2] - 4.1, b.exit_rollers[2] + 3.9]),
             ("feed_ratchet", "feed_shaft", l.feed, [left_x(d, b, G.feed + 1.6), left_x(d, b, G.feed + 5.4)]),
             ("pick_ratchet", "pick_shaft", l.pick, [left_x(d, b, G.pick + 1.6), left_x(d, b, G.pick + 5.4)]))
-        J("$hub on $shaft", hub, shaft, :holds, c, xs)
+        J("$hub on $shaft", hub, shaft, :keyed, c, xs)
     end
     for side in (-1, 1)
         plate = side < 0 ? "side_plate_left" : "side_plate_right"
@@ -138,96 +95,52 @@ function joints(d::FeederDesign, b::Build)
         push!(js, Joint("tray stand peg at x = $x in tray", "tray_leg", "tray", :slides, nothing, [x]; only = peg))
     end
     J("pad pin in pad bar", "pad_pin", "pad_bar", :holds, l.pad_bar, [-0.1])
+    J("pinion stop in left plate", "pinion_stop", "side_plate_left", :sits, nothing, [-o + 1.1, -o + 5.9])
+    # Each clip fits its groove: clear of the groove's bottom and walls, near both its faces.
+    for c in clips(d, b, l)
+        J("$(c.name) in its groove", c.name, c.shaft, :seated, c.center, [c.x + 0.1, c.x + CLIP.thickness - 0.1])
+    end
     # The root block slides into the pad bar's pocket; the pin passes the block freely.
     J("pad spring root block in pad bar", "pad_spring", "pad_bar", :slides, nothing, [-14.0, -7.0, 5.0, 14.0])
     J("pad pin through root block", "pad_pin", "pad_spring", :slides, nothing, [-1.0])
     return js
 end
 
-"Section of a part at `x`: a printed part as printed, a bought part as drawn."
-part_section(printed::Dict{String, PrintedPart}, name::String, x, axis::Point2d) = section(printed[name], x)
-part_section(::Dict{String, PrintedPart}, p::BoughtSection, x, axis::Point2d) = p.region(x, axis)
+"The feeder's joints checked on the printed parts (`PrintSim.joint_report`)."
+PrintSim.joint_report(printed::Dict{String, PrintedPart}, d::FeederDesign, b::Build = Build()) = joint_report(printed, joints(d, b))
 
-"How far cooling moved a part at (`x`, `axis`) in the profile plane; bought parts stay."
-function profile_drift(printed::Dict{String, PrintedPart}, name::String, x, axis::Point2d)
-    v = drift(printed[name], Vec3d(x, axis[1], axis[2]))
-    return Vec2d(v[2], v[3])
-end
-profile_drift(::Dict{String, PrintedPart}, ::BoughtSection, x, axis::Point2d) = Vec2d(0, 0)
-
-"A region moved by `v` in the profile plane."
-moved(g, v::Vec2d) = map_region(g, q -> [q[1] + v[1], q[2] + v[2]])
+"The play of the feeder's keyed joints (`PrintSim.key_report`)."
+PrintSim.key_report(printed::Dict{String, PrintedPart}, d::FeederDesign, b::Build = Build()) = key_report(printed, joints(d, b))
 
 """
-    check(joint, printed; angles = 0:10:350)
+    clip_check(printed, d, b)
 
-What the printed parts do at `joint`, the worst over its planes: for `:turns` the smallest gap
-at any angle (negative: the overlap area in mm² where it binds), for `:holds` the overlap
-(positive: it grips) or the gap, for `:slides` the gap, for `:sits` and `:rests` how much of the
-moving part has material around or under it.
+Each clip as printed on its groove as printed, at the clip's middle: how far its mouth must open
+to pass the groove (`spread`, mm: the groove's width across the mouth minus the mouth; it also
+holds the clip on, at least 0.5) and the strain that takes (`clip_strain`, at most 2.5 %).
 """
-function check(j::Joint, printed::Dict{String, PrintedPart}; angles = 0:10:350)
-    worst = j.kind in (:sits, :rests) ? 1.0 : Inf
-    for (x, xh) in zip(j.xs, j.host_xs)
-        # The moving part sits where the host's feature ended up after cooling.
-        a0 = part_section(printed, j.moving, x, something(j.axis, Point2d(0, 0)))
-        j.only === nothing || (a0 = GEOS.intersection(a0, GEOS.Polygon([[[q[1], q[2]] for q in vcat(j.only, j.only[1:1])]])))
-        at = something(j.axis, Point2d(GEOS.GeoInterface.coordinates(GEOS.centroid(a0))...))
-        dh = profile_drift(printed, j.host, xh, at)
-        a = moved(j.axis === nothing ? a0 : part_section(printed, j.moving, x, at), dh - profile_drift(printed, j.moving, x, at))
-        h = part_section(printed, j.host, xh, at)
-        axis = at + dh
-        GEOS.isEmpty(a) && error("$(j.moving) has no material at x = $x ($(j.name))")
-        if j.kind == :turns
-            for θ in angles
-                t = turned(a, axis, deg2rad(θ))
-                o = overlap(t, h)
-                worst = min(worst, o > 1.0e-4 ? -o : gap(t, h))
-            end
-        elseif j.kind == :holds
-            o = overlap(a, h)
-            worst = min(worst, o > 1.0e-4 ? o : -gap(a, h))
-        elseif j.kind == :slides
-            o = overlap(a, h)
-            worst = min(worst, o > 1.0e-4 ? -o : gap(a, h))
-        elseif j.kind == :sits
-            ring = GEOS.difference(GEOS.buffer(a, 0.6, 8), a)
-            worst = min(worst, overlap(ring, h) / GEOS.area(ring))
-        else
-            # Its own pegs fill the holes under it.
-            own = moved(part_section(printed, j.moving, xh, at), dh - profile_drift(printed, j.moving, xh, at))
-            worst = min(worst, overlap(a, GEOS.union(h, own)) / GEOS.area(a))
-        end
-    end
-    return worst
-end
-
-"""
-    joint_report(printed, d, b)
-
-Every joint checked on the printed parts, with a verdict: turning parts need a gap at every
-angle, fits that hold need some overlap (clamps, press fits) but not more than printed parts
-give (0.3 mm² per mm of contact is a hard press), slides need a gap, pegs and feet need
-material around or under at least 80 % of them.
-"""
-function joint_report(printed::Dict{String, PrintedPart}, d::FeederDesign = FeederDesign(), b::Build = Build())
-    map(joints(d, b)) do j
-        v = check(j, printed)
-        ok = j.kind == :turns ? v > 0.02 : j.kind == :holds ? v > 0 : j.kind == :slides ? v >= 0 : v >= 0.8
-        (joint = j.name, kind = j.kind, value = round(v; digits = 3), ok = ok)
+function clip_check(printed::Dict{String, PrintedPart}, d::FeederDesign = FeederDesign(), b::Build = Build())
+    map(clips(d, b, Layout(d, b))) do c
+        x = c.x + CLIP.thickness / 2
+        m = normalize(c.mouth)
+        s = Vec2d(-m[2], m[1])
+        # The clip sits where its groove ended up after cooling.
+        q = Vec3d(x, c.center[1], c.center[2])
+        xg = x + drift(printed[c.shaft], q)[1] - drift(printed[c.name], q)[1]
+        dh = profile_drift(printed, c.shaft, xg, c.center)
+        axis = c.center + dh
+        clip = moved(part_section(printed, c.name, x, c.center), dh - profile_drift(printed, c.name, x, c.center))
+        shaft = part_section(printed, c.shaft, xg, c.center)
+        across = [dot(Vec2d(v[1], v[2]) - axis, s) for poly in polygons(shaft) for v in GEOS.GeoInterface.coordinates(GEOS.exteriorRing(poly))]
+        # The arms beyond the shaft's middle toward the mouth, each side on its own.
+        half(sign) = GEOS.Polygon([[[q[1], q[2]] for q in (axis + 0.5 * m, axis + 0.5 * m + 20 * sign * s, axis + 20 * m + 20 * sign * s,
+            axis + 20 * m, axis + 0.5 * m)]])
+        mouth = GEOS.distance(GEOS.intersection(clip, half(1)), GEOS.intersection(clip, half(-1)))
+        spread = maximum(across) - minimum(across) - mouth
+        strain = clip_strain(spread)
+        (clip = c.name, spread = round(spread; digits = 3), strain = round(strain; digits = 2), ok = spread >= 0.5 && strain <= 2.5)
     end
 end
-
-"Smallest and largest distance from `c` of the outline of a region."
-function radii(g, c::Point2d)
-    rs = Float64[]
-    for poly in polygons(g), v in GEOS.GeoInterface.coordinates(GEOS.exteriorRing(poly))
-        push!(rs, hypot(v[1] - c[1], v[2] - c[2]))
-    end
-    return extrema(rs)
-end
-
-disk(c::Point2d, r) = GEOS.buffer(GEOS.Point(c[1], c[2]), r, 32)
 
 """
     mesh_check(printed, d, b; steps = 24)
@@ -396,43 +309,6 @@ function slot_check(printed::Dict{String, PrintedPart}, d::FeederDesign, b::Buil
 end
 
 """
-    printed_interference(printed; step = 1.0, tolerance = 0.05)
-
-Every pair of printed parts that overlap, from cuts across the whole feeder every `step` mm
-along x: the volume they share (mm³, cut area times step) and the deepest overlap (mm, the
-largest overlap area per mm of its outline). Parts stay where they were printed for, each
-cooled toward its own middle. Pairs that are meant to press together show up too.
-"""
-function printed_interference(printed::Dict{String, PrintedPart}; step = 1.0, tolerance = 0.05)
-    names = collect(keys(printed))
-    extent = Dict(n => x_extent(printed[n]) for n in names)
-    lo, hi = minimum(first(e) for e in values(extent)), maximum(last(e) for e in values(extent))
-    shared = Dict{Tuple{String, String}, Vector{Float64}}()
-    for x in (lo + step / 2 + 0.037):step:hi
-        here = [n for n in names if extent[n][1] < x < extent[n][2]]
-        cuts = Dict(n => section(printed[n], x) for n in here)
-        boxes = Dict(n => GEOS.envelope(cuts[n]) for n in here)
-        for i in eachindex(here), j in (i + 1):length(here)
-            a, b = here[i], here[j]
-            GEOS.intersects(boxes[a], boxes[b]) || continue
-            o = GEOS.intersection(cuts[a], cuts[b])
-            area = GEOS.area(o)
-            area > 1.0e-3 || continue
-            depth = 2area / max(GEOS.geomLength(o), 1.0e-9)
-            key = a < b ? (a, b) : (b, a)
-            v = get!(shared, key, [0.0, 0.0])
-            v[1] += area * step
-            v[2] = max(v[2], depth)
-        end
-    end
-    hits = [(a = k[1], b = k[2], volume = round(v[1]; digits = 2), depth = round(v[2]; digits = 3)) for (k, v) in shared if v[1] > tolerance]
-    return sort!(hits; by = h -> -h.volume)
-end
-
-"An axis-aligned rectangle from `lo` to `hi` as a LibGEOS polygon."
-rect(lo::Point2d, hi::Point2d) = GEOS.Polygon([[[lo[1], lo[2]], [hi[1], lo[2]], [hi[1], hi[2]], [lo[1], hi[2]], [lo[1], lo[2]]]])
-
-"""
     lug_check(printed, d, b)
 
 Each motor's lug over its two printed lug pins, in the lug's plane: the pins where their host's
@@ -502,11 +378,11 @@ function board_check(printed::Dict{String, PrintedPart}, d::FeederDesign = Feede
         dk = dc - Vec2d(v[1], v[2])                      # moves the frame onto the carrier's holes
         top_at(part, q, shift = Vec2d(0, 0)) = last(something(z_extent(part, (q - shift)...), (NaN, NaN)))
         bottom_at(part, q, shift = Vec2d(0, 0)) = first(something(z_extent(part, (q - shift)...), (NaN, NaN)))
-        shelf_top = maximum(top_at(carrier, P - Vec2d(sx, sy) * H.shelf / 2 + dc) for (P, (sx, sy)) in f.corners)
+        shelf_top = maximum(top_at(carrier, P - Vec2d(sx * bd.ledge[1], sy * bd.ledge[2]) / 2 + dc) for (P, (sx, sy)) in f.corners)
         post_top = maximum(top_at(carrier, P + Vec2d(sx * (H.post - 0.8), -sy * 0.8) + dc) for (P, (sx, sy)) in f.corners)
         under = minimum(bottom_at(frame, P + Vec2d(sx * (H.post - 0.8), -sy * 0.8) + dc, dk) for (P, (sx, sy)) in f.corners)
         dz = post_top - under
-        fx, fy = finger_reach(bd)
+        fx, fy = bd.finger
         finger = minimum(bottom_at(frame, P - Vec2d(sx * fx, sy * fy) / 2 + dc, dk) for (P, (sx, sy)) in f.corners) + dz
         pegs = [q + dc for q in holder_pegs(f)]
         peg_end = minimum(bottom_at(frame, q, dk) + dz - top_at(carrier, q) for q in pegs)

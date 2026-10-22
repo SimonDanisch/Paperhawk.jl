@@ -1,6 +1,6 @@
 ISO-10303-21;
 HEADER;
-FILE_NAME('Open CASCADE Shape Model','2026-10-19T13:03:49',('Author'),(
+FILE_NAME('Open CASCADE Shape Model','2026-10-21T21:43:55',('Author'),(
     'Open CASCADE'),'Open CASCADE STEP processor 7.9','Open CASCADE 7.9'
   ,'Unknown');
 FILE_DESCRIPTION(('Open CASCADE Model'),'2;1');
@@ -15,8 +15,8 @@ DATA;
 #4 = PRODUCT_DEFINITION_SHAPE('','',#5);
 #5 = PRODUCT_DEFINITION('design','',#6,#9);
 #6 = PRODUCT_DEFINITION_FORMATION('','',#7);
-#7 = PRODUCT('Open CASCADE STEP translator 7.9 46',
-  'Open CASCADE STEP translator 7.9 46','',(#8));
+#7 = PRODUCT('Open CASCADE STEP translator 7.9 47',
+  'Open CASCADE STEP translator 7.9 47','',(#8));
 #8 = PRODUCT_CONTEXT('',#2,'mechanical');
 #9 = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design');
 #10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#1996);

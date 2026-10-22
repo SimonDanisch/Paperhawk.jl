@@ -6,9 +6,11 @@ Everything here is generated from Julia code and checked by simulation before pr
 `design.jl` (paper path), `physics.jl` and `simulation.jl` (2D sheet simulation),
 `envelope.jl` (the conditions it has to handle), `skew.jl` (sheet skew in MuJoCo),
 `mechanics.jl` and `assembly.jl` (parts), `checks.jl` (collisions, motion, assembly,
-strength), `print.jl` (Bambu Studio projects), `printsim.jl` and `printchecks.jl` (the parts
-as printed, rebuilt from Bambu Studio's G-code), `render.jl` and `raytrace/guide.jl` (the
-pictures), `firmware/feeder/feeder.ino` (ESP32).
+strength), `printchecks.jl` (the parts as printed), `render.jl` and `guide.jl` (the
+pictures), `firmware/feeder/feeder.ino` (ESP32). The generic part lives in the
+[PrintSim](../../dev/PrintSim) package: Gmsh solids, Bambu Studio projects, the parts rebuilt
+from Bambu Studio's G-code, the GPU ray checks and the assembly pictures. The feeder hands it
+its parts, joints and assembly steps.
 
 ## How it works
 
@@ -140,21 +142,26 @@ face may swell by up to 0.1 mm, which is how printed holes come out small. At al
 combinations:
 
 - every shaft turns through a full circle in its bores and the pick shaft in the arms, the arms
-  turn on the feed shaft, the cup gears on their shafts and the idler on its shaft;
-- the hubs, ratchets and collars grip their D-shafts and the left arm the idler's shaft; the
-  motor sockets grip the motor shafts' flats from 6 to 9 mm out and stay clear of their round
-  part nearer the motor, for every shaft length the drawings allow;
+  turn on the feed shaft, the cup gears on their shafts and the idler on the left arm's post;
+- the hubs and ratchets slide onto their D-shafts (0.02 to 0.17 mm to spare) and turn 3 to 12°
+  on them before the flat drives them; the pinion and the driven exit shaft slide onto the
+  motors' shafts the same way and meet their flats from 6 to 9 mm out, clear of the round part
+  nearer the motor, for every shaft length the drawings allow;
+- every clip slides into its groove, wherever cooling moved the groove along the shaft (0.02 to
+  0.25 mm to spare); to pass the groove its mouth opens by 0.82 to 1.42 mm, which bends its arms
+  by 0.89 to 1.53 % (`clip_check`), and as much keeps it on;
 - each motor's lug goes over its two printed pins with the holes 35 ± 0.2 mm apart, with
   0.035 to 0.23 mm to spare;
 - the tray, both halves of the lower guide, the upper guide, the carrier and the tie bars slide
   into their pockets, the tray stand's pegs into the tray, and the pad pin presses into the pad
   bar;
 - every peg and pin has plastic around it and every foot and spring block lies on plastic;
-- every board, from the smallest to the largest its listing allows and pushed into any corner
-  of its pocket, drops in (at least 0.095 mm to spare), rests on its four corner shelves (at
-  least 1.5 mm² under each corner), is held down by the clamp frame's fingers (at least
-  1.1 mm² over each corner) with 0.24 mm above the thickest board, and shelves and fingers stay
-  inside the corners where the board carries nothing;
+- every board, from the smallest to the largest its listing, photos and CAD models allow
+  (ULN2003 35.0 to 35.8 × 31.1 to 31.8 mm, ESP32 28.2 to 29.1 × 51.1 to 52.2 mm) and pushed
+  into any corner of its pocket, drops in (at least 0.13 mm to spare), rests on its four corner
+  shelves (at least 2.2 mm² under each corner), is held down by the clamp frame's fingers (at
+  least 1.5 mm² over each corner) with 0.24 mm above the thickest board, and shelves and fingers
+  stay inside the corners where the board carries nothing;
 - both motor plugs pass through their slots, and each slot keeps at least 6 mm of plastic to
   the next hole or pocket;
 - the gears, rolled against each other about the axes where the cooled plate and the cooled
@@ -167,11 +174,14 @@ combinations:
 - cut every millimeter across the feeder, the printed parts only overlap where they press
   together or a spring or pawl is preloaded.
 
-These checks changed the design: the lower guide is two halves (whole, the bed beside the pad
-would have started in mid-air), the pad spring's root block has a wedge under it so the spring
-lies flat on the bed, the tray stand lies on its square back face, the pad pin is the same
-3.2 mm pin in a 3.1 mm hole as the lug pins, the stand's pegs got 0.3 mm of play, and Bambu
-Studio slices every plate without a warning.
+These checks changed the design: nothing holds by friction any more. With no play, the hubs,
+ratchets and collars came out between no grip at all (holes as drawn) and a press fit of up to
+0.16 mm (holes swollen), too tight to push a 30 mm hub on by hand; now they slide on and clips
+in grooves hold them (see Construction). Before that, the lower guide became two halves
+(whole, the bed beside the pad would have started in mid-air), the pad spring's root block got
+a wedge under it so the spring lies flat on the bed, the tray stand lies on its square back
+face, the pad pin is the same 3.2 mm pin in a 3.1 mm hole as the lug pins, the stand's pegs got
+0.3 mm of play, and Bambu Studio slices every plate without a warning.
 
 ### Skew
 
@@ -194,22 +204,30 @@ at most 1.3° turned (the camera straightens it), inside a box 220 mm wide.
 
 ### Construction
 
-The CAD checks build every part in place with OpenCASCADE: no two parts overlap except the
-intended press fits (O-rings in their grooves, pawl tips on the ratchets, lug pins, the pad pin,
-the clamp frames' pegs); the pick arm with everything it carries swings freely from an empty
-tray to a full one and 15 mm higher for loading; the lower exit roller can drop its full travel.
-The feeder goes together in the order of [ASSEMBLY.md](ASSEMBLY.md): every part, moved in along
-its way at most 1.5 mm at a time, touches nothing already in place more than at its own place
-(where press fits overlap), except the O-rings, which stretch by 16 % over the hubs' lands
-(`sequence_check`). This check changed the order: the pad spring goes into the pad bar on the
-table, before the bar goes into the frame, because in the frame the lower guide's bed is in the
-head's way; and the collars beside the rollers are threaded onto their shafts as the shafts go
-in, because snapped on from the side their 5.4 mm slot would have to open by 4.6 mm, a strain
-of 2.7 %, more than PETG takes. The arm's
-parts weigh 86 g and press the pick roller on with 0.70 to 0.74 N, from a full to an empty
-tray. Each board and the room it needs (the parts on it, the motor plug, the jumper wires and
-their bends, the ESP32's USB-C plug and cable) is clear of every printed part, for the smallest
-and largest board in every corner of its pocket. Each motor's lead, laid from its housing to
+The CAD checks (PrintSim's `RayChecks`, the feeder's `checks.jl`) triangulate every part once and cast about a quarter
+of a million parallel lines through each pair of parts whose boxes meet, on the GPU with
+Raycore's ray queries (the Radeon's ray-tracing hardware through Mantle; the software BVH
+elsewhere): how long the lines run inside both is the volume they share, within 1.5 % of
+OpenCASCADE's booleans. A part's pose moves the lines into it, so a swing, a slide or an
+assembly move costs no rebuild; the whole set runs in about four minutes, half of it Gmsh
+triangulating the parts. No two parts overlap except the intended press fits (O-rings in their grooves,
+pawl tips on the ratchets, lug pins, the pad pin, the pinion stop's peg, the clamp frames'
+pegs); the pick arm with everything it carries swings freely from an empty tray to a full one
+and 15 mm higher for loading (and, as a test of the test, hits the tray, the plates and the pad
+spring when pushed 20 mm too far); the lower exit roller can drop its full travel; each shaft
+passes the frame on its way in. The feeder goes together in the order of
+[ASSEMBLY.md](ASSEMBLY.md): every part, moved in along its way 0.5 mm at a time, touches nothing
+already in place more than at its own place (where press fits overlap), except the O-rings,
+which stretch by 16 % over the hubs' lands, the clips, which open over their groove's edge, and
+the pad pin, pressed through the bar, by 0.6 mm³ just before its place (`sequence_check`).
+This check changed the order: the pad spring goes into the pad bar on the table, before the bar
+goes into the frame, because in the frame the lower guide's bed is in the head's way; and the
+clips of the lower exit shaft go on from the front, because from above the driven shaft and the
+guides are in their way. The arm's parts weigh 84 g and press the pick
+roller on with 0.68 to 0.72 N, from a full to an empty tray, inside the 0.65 to 0.8 N the
+simulation covers. Each board and the room it needs (the parts on it, the motor plug, the jumper
+wires and their bends, the ESP32's USB-C plug and cable) is clear of every printed part, for the
+smallest and largest board in every corner of its pocket. Each motor's lead, laid from its housing to
 its slot and on to the farthest corner of its driver, misses every part, the circles the gear
 teeth sweep and everything the arm swings through, and needs 201 mm (drive) and 214 mm (exit)
 with 20 mm slack of the 220 mm the shortest lead has. Seen from the phone, the feeder hides
@@ -218,6 +236,50 @@ rollers: up to 5.6 mm deep in an empty box, 12 mm with 15 mm of paper in it. Mos
 with their back edge 4 to 10 mm from the box's wall (0 to 25 mm in all cases), so those two
 patches can cut a few millimeters off the edge's middle; the rest of the edge stays in view.
 
+The bought parts are drawn from their datasheets and listings and checked against CAD models
+of them (see the files below), taking the worse value where they differ: the motor's cable
+housing, 14.6 mm wide in both drawings, is 14.6, 18 and 19 mm wide and up to 18 mm deep in
+three models and is drawn 19 × 18 mm; the driver board is 35.1 × 31.5 mm in its model and
+35.5 × 31.4 mm in its listing; the ESP32 boards of this style are 28.0 × 51.4 (DOIT, micro USB),
+28.4 × 51.3 (the one listed, measured on its photo) and 29.0 × 52.0 mm (USB-C), and their
+header rows sit at the 25.4 mm pitch whatever the board's width. Below 28.2 mm the jumper
+housings would stand past the board's edges, so the ESP32's pocket takes 28.2 to 29.1 mm.
+Corner shelves and clamp fingers stay where the models carry nothing: on the ESP32 the last
+pin's solder joints sit 4.9 to 5.7 mm from its far end, so the fingers reach 4 mm in.
+
+**What keeps the parts in place.** Nothing holds by friction. Parts that turn with a shaft slide
+onto its D with 0.25 mm of play and its flat drives them; the pinion and the driven exit shaft
+slide onto the motors' shafts with 0.15 mm. Twenty PETG clips in grooves 0.8 mm deep keep
+them in place along the shafts: E-shaped, pushed on sideways, their arms tapering from 2.4 to
+1.4 mm so the bending spreads along them. The idler turns on a post of the left arm, and a
+peg in the left plate keeps the pinion from walking off the motor's shaft. `axial_check` casts
+lines exactly along x through each body and what lies beside it, reads off each line how far
+the body slides before it meets something, and slides each body both ways until the frame
+stops it, pushing whatever free part it meets ahead of it:
+
+| Body | Left | Right | Stopped by |
+|---|---|---|---|
+| Feed shaft with its roller, ratchet and clips | 1.0 mm | 1.25 mm | the right arm on the right plate; the cup gears on the left arm and the pad bar's tenon |
+| Pick shaft with its roller, ratchet and clips | 1.0 mm | 1.25 mm | the right arm on the right plate; the left arm on the left plate |
+| Driven exit shaft | 0.5 mm | 0.2 mm | its clip inside the left plate; the motor's shaft in its socket |
+| Lower exit shaft | 0.5 mm | 0.5 mm | its clips inside both plates |
+| Cup gears, arms, idler | 0.5 to 2.25 mm | 0.5 to 1.75 mm | each other and the plates |
+| Pinion | 0.5 mm | 0.5 mm | the bracket; the pinion stop |
+| Hubs between their clips | 0.5 mm | 0.5 mm | the clips |
+| Ratchets in their cup gears | 0.25 mm | 0.75 mm | the cup's base; the next gear or the arm |
+
+The pad bar's tenon ends 0.5 mm before the pick gear's face, one of its corners 0.7 mm inside
+the gear's tip circle: pushed against the arm, a tooth tip can graze it (less than 0.01 mm² of
+contact), so the pick gear stops there and at the arm alike.
+
+Over that much play the feed gear and the idler still mesh over 5 of their 7.5 mm (the idler's
+teeth then bend with 1.1 MPa), the other gears over at least 10 mm, and the ratchets stay
+within their pawls' reach. Cooling shortens a pick or feed shaft by up to 1.7 mm between its
+outermost clips (twice the nominal shrinkage) while the tie bars pull the plates 1.3 mm closer
+together: at least 2 mm of play remains. The driven exit shaft is held at the left plate, so
+its cooling (up to 1.4 mm over its 240 mm) and its play move the socket out along the motor's
+shaft: it still meets the shortest shaft's flats over 2.7 mm.
+
 Beam theory checks the shafts, springs, pawls and gears against the simulated loads:
 
 | Check | Value | Limit |
@@ -225,6 +287,7 @@ Beam theory checks the shafts, springs, pawls and gears against the simulated lo
 | Feed shaft sag under the pad | 0.19 mm | 0.3 mm |
 | Pick shaft bending stress | 0.84 MPa | 7 MPa |
 | Exit rollers out of parallel across their width | 0.15 mm | 0.3 mm O-ring squeeze |
+| Shaft bending stress in a clip's groove, three times for its corners (feed, pick, exit) | 2.0, 3.2, 4.6 MPa | 7 MPa |
 | Pad spring stress at 2 N | 8.9 MPa | 10 MPa (PETG, no creep) |
 | Idler spring stress | 6.7 MPa | 10 MPa |
 | Pawl strain, as printed | 0.95 % | 3 % (PETG) |
@@ -259,5 +322,9 @@ every printed part as STEP (`parts/step`) and binary STL (`parts/stl`). The pict
 [ASSEMBLY.md](ASSEMBLY.md) and at the top of the README are raytraced with RayMakie at 512
 samples per pixel: the parts in their materials on a plywood desk in a photo studio (Poly
 Haven's `brown_photostudio_02` HDRI and `plywood` texture, both CC0, downloaded into
-`~/.cache/paperhawk-feeder`). `raytrace/guide.jl` renders them in the environment of
-`raytrace/`, which has RayMakie and the Makie it needs, apart from the app's.
+`~/.cache/PrintSim`). `guide.jl` renders them (`feeder_guide`, `machine_picture`).
+The motors and boards in the pictures are CAD models others drew, downloaded the same way:
+the 28BYJ-48 by Charles Fox from the [FreeCAD library](https://github.com/FreeCAD/FreeCAD-library)
+(CC-BY 3.0), the ULN2003 driver board from the [escornabot](https://github.com/escornabot/3dmodel)
+project (MIT) and the USB-C ESP32 DevKit by Josselin Hefti on
+[Printables](https://www.printables.com/model/1362332-esp32-devkit-v1-board-30-pin) (CC0).

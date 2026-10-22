@@ -2,29 +2,46 @@
 # with how to build it in Gmsh (in its assembled place), its material and how it lies on the
 # print bed. Clearance checks, renders and print files all start from this list.
 
-"""
-One item of the feeder. `build(loaded)` adds its solids to the current Gmsh model in the
-assembled position; springs differ between `loaded` (as assembled) and unloaded (as printed).
-`material` is `:PLA`, `:PETG`, `:bought` or `:household`. `down` is the direction (assembly
-coordinates) that faces the print bed. `group` names the assembly step the item belongs to.
-"""
-struct Item{F}
-    name::String
-    material::Symbol
-    color::Symbol
-    build::F
-    down::Vec3d
-    size::Float64
-    settings::Vector{Pair{String, String}}
-    group::Symbol
-end
-
-Item(name, material, color, build; down = Vec3d(-1, 0, 0), size = 2.0, settings = Pair{String, String}[], group = :frame) =
-    Item(name, material, color, build, down, size, settings, group)
-
-printed(i::Item) = i.material in (:PLA, :PETG)
-
 const X = Vec3d(1, 0, 0)
+
+"""
+    clips(d, b, l)
+
+Every retaining clip, in the order the items list them: its name, the part with the groove it
+sits in, that part's axis, the clip's low face `x`, the side it opens to and is pushed on toward
+(`mouth`; down unless that way is blocked) and the `site` it belongs to. Each keeps a part beside it from sliding along: beside
+the pick and feed rollers and outside the right arm, which holds those shafts in the arms
+(`:pick`, `:feed`); on both sides of each exit and idler roller (`:exit_1`, `:exit_2`); outside
+and inside the left plate on the driven exit shaft, whose right end floats on the motor's shaft
+(`:drive_left`); inside both plates on the idler shaft (`:idle_ends`); on the left arm's post
+outside the idler (`:idler`) and outside the feed cup gear (`:feed_out`).
+"""
+function clips(d::FeederDesign, b::Build, l::Layout)
+    W2 = d.inner_width / 2
+    o = W2 + b.plate
+    G = GEAR_PLANES
+    t = CLIP.thickness
+    L = b.exit_roller_length
+    list = @NamedTuple{name::String, shaft::String, center::Point2d, x::Float64, mouth::Vec2d, site::Symbol}[]
+    clip(name, shaft, center, x, site; mouth = Vec2d(0, -1)) = push!(list, (; name, shaft, center, x, mouth, site))
+    for (name, c) in (("pick", l.pick), ("feed", l.feed)), x in (-b.roller_length / 2 - 0.5 - t, b.roller_length / 2 + 0.5, o + G.arm[2] + 0.5)
+        clip("$(name)_clip_$(round(Int, x))", "$(name)_shaft", c, x, Symbol(name))
+    end
+    # The lower exit shaft's clips go on from the front (+y), open toward the back: from above, the
+    # driven shaft and the guides are in the way.
+    from_front = Vec2d(-1, 0)
+    for (k, xc) in enumerate(b.exit_rollers), x in (xc - L / 2 - 0.5 - t, xc + L / 2 + 0.5), (name, c) in (("drive", l.exit_up), ("idle", l.exit_low))
+        clip("exit_$(name)_clip_$(round(Int, x))", "exit_$(name)_shaft", c, x, Symbol("exit_$k"); mouth = name == "idle" ? from_front : Vec2d(0, -1))
+    end
+    clip("exit_drive_clip_out", "exit_drive_shaft", l.exit_up, -o - 0.5 - t, :drive_left)
+    clip("exit_drive_clip_in", "exit_drive_shaft", l.exit_up, -W2 + 0.5, :drive_left)
+    for x in (-W2 + 0.5, W2 - 0.5 - t)
+        clip("exit_idle_clip_$(round(Int, x))", "exit_idle_shaft", l.exit_low, x, :idle_ends; mouth = from_front)
+    end
+    clip("idler_clip", "arm_l", idler_center(l.gearbox, l.feed, l.pick), left_x(d, b, G.idler_clip + t), :idler)
+    clip("feed_clip_out", "feed_shaft", l.feed, left_x(d, b, G.clip + t), :feed_out)
+    return list
+end
 
 """
     items(design = FeederDesign(), build = Build())
@@ -41,6 +58,12 @@ function items(d::FeederDesign = FeederDesign(), b::Build = Build())
     plane(v::Vec2d) = Vec3d(0, v[1], v[2])
     flat = Vec3d(0, 0, -1)                 # D-shafts lie on their flat
     solid_fill = ["sparse_infill_density" => "100%"]
+    all_clips = clips(d, b, l)
+    clips_at!(site, group) = for c in filter(c -> c.site == site, all_clips)
+        add!(c.name, :PETG, :gold, _ -> clip!(c.center, c.x, c.mouth); down = -X, size = 0.6, settings = solid_fill, group)
+    end
+    # A shaft with the grooves of its clips.
+    grooved(tags, shaft) = foldl((t, c) -> cut!(t, groove(c.center, c.x, b.shaft / 2)), filter(c -> c.shaft == shaft, all_clips); init = tags)
 
     # Frame
     add!("side_plate_right", :PLA, :steelblue, _ -> side_plate!(d, b, l, 1); down = X, size = 3.0)
@@ -62,39 +85,35 @@ function items(d::FeederDesign = FeederDesign(), b::Build = Build())
     end
 
     # Feed and pick shaft. The feed shaft turns in the plates; the pick shaft swings in their arc
-    # slots, carried by the arms outside them. Collars beside the rollers and outside the right arm
-    # keep the shafts in place.
+    # slots, carried by the arms outside them. Clips beside the rollers keep them on their shafts,
+    # clips outside the right arm keep the shafts in the arms.
     G = GEAR_PLANES
-    right_end = o + G.arm[2] + 5.5
-    add!("feed_shaft", :PLA, :silver, _ -> shaft!(b, l.feed, left_x(d, b, G.collar + 5.0), right_end); down = flat, size = 1.5,
-        settings = solid_fill, group = :shafts)
-    add!("pick_shaft", :PLA, :silver, _ -> shaft!(b, l.pick, left_x(d, b, G.pick + 13.5), right_end); down = flat, size = 1.5,
-        settings = solid_fill, group = :shafts)
+    t = CLIP.thickness
+    right_end = o + G.arm[2] + 0.5 + t + 2.0
+    add!("feed_shaft", :PLA, :silver, _ -> grooved(shaft!(b, l.feed, left_x(d, b, G.clip + t + 2.0), right_end), "feed_shaft");
+        down = flat, size = 1.5, settings = solid_fill, group = :shafts)
+    add!("pick_shaft", :PLA, :silver, _ -> grooved(shaft!(b, l.pick, left_x(d, b, G.pick + 13.5), right_end), "pick_shaft");
+        down = flat, size = 1.5, settings = solid_fill, group = :shafts)
     for (name, c) in (("pick", l.pick), ("feed", l.feed))
         add!("$(name)_hub", :PLA, :darkorange, _ -> ring_hub!(b, c, -b.roller_length / 2, b.roller_length; radius = d.pick_radius, rings = 3);
             down = -X, size = 1.0, settings = solid_fill, group = :shafts)
-        for x in (-b.roller_length / 2 - 5.5, b.roller_length / 2 + 0.5, o + G.arm[2] + 0.5)
-            add!("$(name)_collar_$(round(Int, x))", :PETG, :gold, _ -> collar!(b, c, x; radius = 7.0); down = -X, size = 0.8, settings = solid_fill, group = :shafts)
-        end
+        clips_at!(Symbol(name), :shafts)
     end
     # Driven exit shaft: the exit motor's shaft goes into a socket in its right end.
-    add!("exit_drive_shaft", :PLA, :silver, _ -> exit_drive_shaft!(b, l, -o - 6, o - BYJ48.boss_height - 0.2, o);
+    add!("exit_drive_shaft", :PLA, :silver, _ -> grooved(exit_drive_shaft!(b, l, -o - 0.5 - t - 2.0, o - BYJ48.boss_height - 0.2, o), "exit_drive_shaft");
         down = flat, size = 1.5, settings = solid_fill, group = :shafts)
-    add!("exit_idle_shaft", :PLA, :silver, _ -> shaft!(b, l.exit_low, -o - 10, o + 10); down = flat, size = 1.5, settings = solid_fill, group = :shafts)
+    add!("exit_idle_shaft", :PLA, :silver, _ -> grooved(shaft!(b, l.exit_low, -o - 10, o + 10), "exit_idle_shaft"); down = flat, size = 1.5,
+        settings = solid_fill, group = :shafts)
     L = b.exit_roller_length
     for (k, xc) in enumerate(b.exit_rollers)
         add!("exit_hub_$k", :PLA, :darkorange, _ -> ring_hub!(b, l.exit_up, xc - L / 2, L; radius = d.exit_radius, rings = 2);
             down = -X, size = 1.0, group = :shafts)
         add!("exit_idler_$k", :PLA, :gray80, _ -> ring_hub!(b, l.exit_low, xc - L / 2, L; radius = d.exit_radius, rings = 2);
             down = -X, size = 1.0, group = :shafts)
-        for x in (xc - L / 2 - 5.5, xc + L / 2 + 0.5), (name, c) in (("drive", l.exit_up), ("idle", l.exit_low))
-            add!("exit_$(name)_collar_$(round(Int, x))", :PETG, :gold, _ -> collar!(b, c, x; radius = 7.5); down = -X, size = 0.8, settings = solid_fill, group = :shafts)
-        end
+        clips_at!(Symbol("exit_$k"), :shafts)
     end
-    add!("exit_drive_collar_left", :PETG, :gold, _ -> collar!(b, l.exit_up, -o - 6; radius = 7.5); down = -X, size = 0.8, settings = solid_fill, group = :shafts)
-    for x in (-W2 + 0.5, W2 - 5.5)
-        add!("exit_idle_collar_$(round(Int, x))", :PETG, :gold, _ -> collar!(b, l.exit_low, x; radius = 7.5); down = -X, size = 0.8, settings = solid_fill, group = :shafts)
-    end
+    clips_at!(:drive_left, :shafts)
+    clips_at!(:idle_ends, :shafts)
     for side in (-1, 1)
         add!("idler_spring_$(side > 0 ? "r" : "l")", :PETG, :yellowgreen, loaded -> idler_spring!(d, b, l, side; loaded);
             down = side > 0 ? X : -X, size = 1.0, settings = solid_fill, group = :springs)
@@ -117,13 +136,9 @@ function items(d::FeederDesign = FeederDesign(), b::Build = Build())
             settings = solid_fill, group = :drives)
     end
     g = l.gearbox
-    I = idler_center(g, l.feed, l.pick)
     phases = gear_phases(g, l.feed, l.pick)
-    add!("idler_shaft", :PLA, :silver, _ -> shaft!(b, I, left_x(d, b, G.idler_collar + 5.0), left_x(d, b, G.arm[1])); down = flat, size = 1.0,
-        settings = solid_fill, group = :drives)
     add!("idler", :PETG, :yellowgreen, _ -> idler!(d, b, l); down = -X, size = 0.6, settings = solid_fill, group = :drives)
-    add!("idler_collar", :PETG, :gold, _ -> collar!(b, I, left_x(d, b, G.idler_collar + 5.0); radius = 7.0); down = -X, size = 0.8,
-        settings = solid_fill, group = :drives)
+    clips_at!(:idler, :drives)
 
     # Gearbox: the motor turns the feed gear; feed and pick roller run behind freewheels.
     for (name, c, gear, phase, u) in (("feed", l.feed, g.feed, phases[2], G.feed), ("pick", l.pick, g.pick, phases[4], G.pick))
@@ -133,8 +148,8 @@ function items(d::FeederDesign = FeederDesign(), b::Build = Build())
         add!("$(name)_cup_gear", :PETG, :yellowgreen, _ -> cup_gear!(b, c, left_x(d, b, u), 1; gear, phase, spin = 1);
             down = -X, size = 0.6, settings = solid_fill, group = :drives)
     end
-    add!("feed_collar_out", :PETG, :gold, _ -> collar!(b, l.feed, left_x(d, b, G.collar + 5.0); radius = 7.0);
-        down = -X, size = 0.8, settings = solid_fill, group = :drives)
+    clips_at!(:feed_out, :drives)
+    add!("pinion_stop", :PLA, :gray40, _ -> pinion_stop!(d, b, l); down = -X, size = 0.6, group = :drives)
     add!("drive_pinion", :PLA, :tomato, _ -> pinion!(d, b, g); down = -X, size = 0.6, settings = solid_fill, group = :drives)
     add!("drive_bracket", :PLA, :steelblue, _ -> motor_bracket!(b, g.motor, -o, -1; turn = g.turn, standoff = G.face, reach = g.reach);
         down = -X, size = 1.0, group = :drives)
@@ -167,6 +182,8 @@ function items(d::FeederDesign = FeederDesign(), b::Build = Build())
     add!("coupon", :PLA, :tomato, _ -> coupon!(b; origin = Point2d(-150.0, 120.0), x0 = o + 100); down = -X, size = 0.8, group = :coupon)
     add!("coupon_shaft", :PLA, :tomato, _ -> coupon_shaft!(b; origin = Point2d(-150.0, 100.0), x0 = o + 100); down = Vec3d(0, 0, -1),
         size = 0.8, group = :coupon)
+    add!("coupon_clip", :PETG, :gold, _ -> clip!(Point2d(-150.0, 100.0), o + 142, Vec2d(0, -1)); down = -X, size = 0.6, settings = solid_fill,
+        group = :coupon)
     return out
 end
 
@@ -221,23 +238,16 @@ end
 """
     parts(design = FeederDesign(), build = Build(); dir = nothing)
 
-Every item of the feeder as a display mesh in its assembled place. With `dir`, each printed
-item is also written (in assembly coordinates, unloaded springs) as STEP into `dir/step`, for
-editing in CAD, and as binary STL into `dir/stl`, which GitHub shows in 3D.
+Every item of the feeder as a display mesh in its assembled place, and with `dir` its print
+files (`PrintSim.parts`).
 """
-function parts(d::FeederDesign = FeederDesign(), b::Build = Build(); dir = nothing)
-    dir === nothing || foreach(sub -> mkpath(joinpath(dir, sub)), ("step", "stl"))
-    with_gmsh() do
-        gmsh.option.setNumber("Mesh.Binary", 1)
-        map(items(d, b)) do it
-            m = solid(() -> it.build(true), it.name; size = it.size)
-            if dir !== nothing && printed(it)
-                generate_mesh(() -> it.build(false), it.name; size = it.size)
-                gmsh.write(joinpath(dir, "step", it.name * ".step"))
-                gmsh.write(joinpath(dir, "stl", it.name * ".stl"))
-                gmsh.model.remove()
-            end
-            Part(it.name, m, it.color, it.material)
-        end
-    end
-end
+PrintSim.parts(d::FeederDesign, b::Build = Build(); dir = nothing) = parts(items(d, b); dir)
+
+"""
+    export_3mf(design, path; build = Build(), groups = nothing, kw...)
+
+The feeder's printed items as a Bambu Studio project (`PrintSim.export_3mf`); `groups` limits
+the export, e.g. to `(:coupon,)` for the tolerance coupon.
+"""
+PrintSim.export_3mf(d::FeederDesign, path; build = Build(), groups = nothing, kw...) =
+    export_3mf(filter(it -> groups === nothing || it.group in groups, items(d, build)), path; kw...)

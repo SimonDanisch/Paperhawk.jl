@@ -1,187 +1,43 @@
 # Checks of the construction before anything is printed: parts that overlap where they should
 # not, and springs, motors and shafts against the loads the simulation found.
 
-"Solids of every item built into the current Gmsh model, keyed by item index."
-function build_all!(list::Vector{<:Item}; loaded = true)
-    tags = Vector{Vector{Tuple{Int32, Int32}}}(undef, length(list))
-    for (k, it) in enumerate(list)
-        tags[k] = it.build(loaded)
-    end
-    occ().synchronize()
-    return tags
-end
-
-function bounding_box(tags)
-    lo, hi = fill(Inf, 3), fill(-Inf, 3)
-    for (dim, tag) in tags
-        b = occ().getBoundingBox(dim, tag)
-        lo .= min.(lo, b[1:3])
-        hi .= max.(hi, b[4:6])
-    end
-    return lo, hi
-end
-
-overlaps((lo1, hi1), (lo2, hi2); margin = 0.0) = all(lo1 .- margin .<= hi2) && all(lo2 .- margin .<= hi1)
-
 "The items that stand in the assembled feeder: without spare variants."
 assembled(d::FeederDesign, b::Build) = filter(it -> it.group != :variants, items(d, b))
 
-"""
-    interference(design, build; loaded = true, tolerance = 0.5)
+"The assembled feeder's items, traced for the GPU checks (`PrintSim.RayChecks`)."
+PrintSim.RayChecks(d::FeederDesign, b::Build = Build(); rays = Rays()) = RayChecks(assembled(d, b); rays)
 
-Builds the whole feeder and intersects every pair of items whose bounding boxes touch.
-Returns the pairs that share more than `tolerance` mm³, largest first: in a design that fits,
-only intended press fits (wedges, O-rings in their grooves) show up.
-"""
-function interference(d::FeederDesign = FeederDesign(), b::Build = Build(); loaded = true, tolerance = 0.5)
-    list = assembled(d, b)
-    hits = NamedTuple{(:a, :b, :volume), Tuple{String, String, Float64}}[]
-    with_gmsh() do
-        gmsh.model.add("interference")
-        tags = build_all!(list; loaded)
-        boxes = [bounding_box(t) for t in tags]
-        for i in eachindex(list), j in (i + 1):length(list)
-            overlaps(boxes[i], boxes[j]) || continue
-            # Intersect copies: when one solid lies inside the other, OCC hands back the original.
-            common, _ = occ().intersect(occ().copy(tags[i]), occ().copy(tags[j]))
-            isempty(common) && continue
-            v = sum(occ().getMass(dim, tag) for (dim, tag) in common if dim == 3; init = 0.0)
-            occ().remove(common, true)
-            v > tolerance && push!(hits, (a = list[i].name, b = list[j].name, volume = v))
-        end
-    end
-    return sort!(hits; by = h -> -h.volume)
-end
-
-"""
-    electronics_check(d, b; tolerance = 0.01)
-
-The bought boards and the room they need (`board_envelopes`: their parts, the motor plugs, the
-jumper wires and their bends, the USB-C plug and cable) against every printed part, for each
-board at its smallest and its largest, pushed into every corner of its pocket. Returns the
-volume each pair shares, mm³; empty when everything is clear.
-"""
-function electronics_check(d::FeederDesign = FeederDesign(), b::Build = Build(); tolerance = 0.01)
-    l = Layout(d, b)
-    hits = NamedTuple{(:board, :size, :at, :part, :what, :volume), Tuple{String, Tuple{Float64, Float64}, Vec2d, String, Symbol, Float64}}[]
-    with_gmsh() do
-        gmsh.model.add("electronics")
-        solids = build_named!(items(d, b); keep = printed)
-        boxes = Dict(n => bounding_box(t) for (n, t) in solids)
-        for bd in BOARDS
-            f = board_frame(d, l, bd)
-            for s in ((bd.size[1] - bd.spread[1], bd.size[2] - bd.spread[2]), (bd.size[1] + bd.spread[1], bd.size[2] + bd.spread[2]))
-                for kx in (-1, 1), ky in (-1, 1)
-                    at = Vec2d(kx * (f.hx - s[1] / 2), ky * (f.hy - s[2] / 2))
-                    for (what, tags) in ((:room, board_envelopes(d, l, bd; size = s, at)), (:board, board!(d, l, bd; size = s, at)))
-                        box = bounding_box(tags)
-                        for (name, t) in solids
-                            overlaps(box, boxes[name]) || continue
-                            v = shared(tags, t)
-                            v > tolerance && push!(hits, (board = bd.name, size = s, at = at, part = name, what = what, volume = v))
-                        end
-                        occ().remove(tags, true)
-                    end
-                end
-            end
-        end
-    end
-    return hits
-end
-
-"""
-    cable_route_check(d, b; radius = 2.0)
-
-Each motor's lead along `cable_routes` as a tube (the five AWG 26 wires bundled, 4 mm thick)
-against every part of the feeder and against the circles the gears' teeth sweep (1 mm wider):
-the volume shared, mm³. The lead's first 2 mm leave the motor's housing and are left out.
-"""
-function cable_route_check(d::FeederDesign = FeederDesign(), b::Build = Build(); radius = 2.0, tolerance = 0.01)
-    l = Layout(d, b)
-    g = l.gearbox
-    G = GEAR_PLANES
-    hits = NamedTuple{(:motor, :part, :volume), Tuple{String, String, Float64}}[]
-    with_gmsh() do
-        gmsh.model.add("cables")
-        solids = build_named!(items(d, b); keep = it -> !(it.group in (:coupon, :variants)))
-        # Teeth with 1 mm to spare, and what swings with the arm wherever it goes.
-        span(u0, u1) = (left_x(d, b, u1), u1 - u0)
-        swing = swing_points(l.profile, d)
-        sweeps = Dict{String, Vector{Tuple{Int32, Int32}}}("pinion teeth" => cylinder_x(g.motor, tip_radius(g.pinion) + 1.0, span(G.pinion...)...),
-            "feed gear teeth" => cylinder_x(l.feed, tip_radius(g.feed) + 1.0, span(G.feed, G.feed + 13.5)...),
-            "pick gear teeth" => reduce(vcat, [cylinder_x(P, tip_radius(g.pick) + 1.0, span(G.pick, G.pick + 13.5)...) for P in swing]),
-            "idler teeth" => reduce(vcat, [cylinder_x(idler_center(g, l.feed, P), tip_radius(g.idler) + 1.0, span(G.idler...)...) for P in swing]),
-            "arm" => reduce(vcat, [cylinder_x(q, 9.0, span(G.arm...)...) for P in swing for q in (P, idler_center(g, l.feed, P))]))
-        for r in cable_routes(d, b, l)
-            pts = r.points
-            start = pts[1] + 2.0 * normalize(pts[2] - pts[1])
-            path = vcat([start], pts[2:end])
-            tube = Tuple{Int32, Int32}[]
-            for k in 1:(length(path) - 1)
-                a, v = path[k], path[k + 1] - path[k]
-                push!(tube, (3, occ().addCylinder(a[1], a[2], a[3], v[1], v[2], v[3], radius)))
-                k > 1 && push!(tube, (3, occ().addSphere(a[1], a[2], a[3], radius)))
-            end
-            for (name, t) in merge(solids, sweeps)
-                name == r.board && continue          # the lead ends on its board
-                v = shared(tube, t)
-                v > tolerance && push!(hits, (motor = r.motor, part = name, volume = v))
-            end
-            occ().remove(tube, true)
-        end
-    end
-    return hits
-end
-
-"Builds `list` (all of it, or the items `keep` accepts) and returns their solids by name."
-function build_named!(list; loaded = true, keep = _ -> true)
-    out = Dict{String, Vector{Tuple{Int32, Int32}}}()
-    for it in list
-        keep(it) || continue
-        out[it.name] = it.build(loaded)
-    end
-    return out
-end
-
-"Volume shared by solid sets `a` and `b`, in mm³ (computed on copies)."
-function shared(a, b)
-    common, _ = occ().intersect(occ().copy(a), occ().copy(b))
-    v = sum(occ().getMass(dim, tag) for (dim, tag) in common if dim == 3; init = 0.0)
-    isempty(common) || occ().remove(common, true)
-    return v
-end
-
-"Which of `static` (name => solids) the solids `moving` overlap by more than `tolerance` mm³."
-function collisions(moving, static; tolerance = 0.5, ignore = String[])
-    box = bounding_box(moving)
-    hits = Pair{String, Float64}[]
-    for (name, tags) in static
-        name in ignore && continue
-        overlaps(box, bounding_box(tags)) || continue
-        v = shared(moving, tags)
-        v > tolerance && push!(hits, name => v)
-    end
-    return hits
-end
+"The feeder built in the order of its assembly guide (`PrintSim.sequence_check`)."
+PrintSim.sequence_check(c::RayChecks, d::FeederDesign, b::Build = Build(); kw...) = sequence_check(c, assembly_steps(d, b); kw...)
 
 "Items that swing with the pick arm about the feed shaft."
-const SWINGING = r"^(arm_[lr]|pick_shaft|pick_hub|pick_orings|pick_collar_.*|pick_ratchet|pick_cup_gear|idler|idler_shaft|idler_collar)$"
+const SWINGING = r"^(arm_[lr]|pick_shaft|pick_hub|pick_orings|pick_clip_.*|pick_ratchet|pick_cup_gear|idler|idler_clip)$"
+
+"Items that drop with the lower exit roller in its slots."
+const IDLE_PARTS = r"^(exit_idle_shaft|exit_idler_\d|idler_\d_orings|exit_idle_clip_.*)$"
 
 """
-    swing!(tags, name, l, Δθ)
+    swing_pose(name, l, Δθ)
 
-Turns the solids of swinging item `name` with the arm by `Δθ` about the feed shaft. The idler
-rolls on the standing feed gear as it goes, so it also turns about its own axis by Δθ·30/18,
-and the pick gear and ratchet by −Δθ (the other teeth keep meshing).
+Where swinging item `name` goes when the arm turns by `Δθ` about the feed shaft. The idler rolls
+on the standing feed gear as it goes, so it also turns about its own axis by Δθ·30/18, and the
+pick gear by −Δθ (the other teeth keep meshing).
 """
-function swing!(tags, name, l::Layout, Δθ)
+function swing_pose(name, l::Layout, Δθ)
     F = l.feed
-    occ().rotate(tags, 0.0, F[1], F[2], 1.0, 0.0, 0.0, Δθ)
+    arm = turn_x(Δθ, F)
     g = l.gearbox
-    P = F + rotate(Vec2d(l.pick - F), Δθ)
-    I = idler_center(g, F, Point2d(P))
-    name == "idler" && occ().rotate(tags, 0.0, I[1], I[2], 1.0, 0.0, 0.0, Δθ * g.feed.teeth / g.idler.teeth)
-    name in ("pick_cup_gear",) && occ().rotate(tags, 0.0, P[1], P[2], 1.0, 0.0, 0.0, -Δθ)
+    P = Point2d(F + rotate(Vec2d(l.pick - F), Δθ))
+    name == "idler" && return turn_x(Δθ * g.feed.teeth / g.idler.teeth, idler_center(g, F, P)) ∘ arm
+    name == "pick_cup_gear" && return turn_x(-Δθ, P) ∘ arm
+    return arm
+end
+
+"Turns the solids `tags` of swinging item `name` as `swing_pose` says."
+function swing!(tags, name, l::Layout, Δθ)
+    p = swing_pose(name, l, Δθ)
+    R, t = p.R, p.t
+    occ().affineTransform(tags, Float64[R[1, 1], R[1, 2], R[1, 3], t[1], R[2, 1], R[2, 2], R[2, 3], t[2], R[3, 1], R[3, 2], R[3, 3], t[3]])
     return tags
 end
 
@@ -196,158 +52,137 @@ function arm_turn(d::FeederDesign, l::Layout, h)
 end
 
 """
-    motion_check(design, build; heights = (0.0, 4.0, 19.0))
+    motion_check(c::RayChecks, design, build; heights = (0, full stack, 15 mm above it))
 
 Moves what moves and looks for collisions with everything else: the pick arm with all it
 carries resting on an empty tray, on a full stack and lifted 15 mm above it for loading; the
 lower exit roller at the bottom of its slot. Returns, per pose, the parts hit and the shared
 volume.
 """
-function motion_check(d::FeederDesign = FeederDesign(), b::Build = Build(); heights = (0.0, d.stack_height, d.stack_height + 15.0))
+function motion_check(c::RayChecks, d::FeederDesign = FeederDesign(), b::Build = Build(); heights = (0.0, d.stack_height, d.stack_height + 15.0),
+        tolerance = 0.5)
     l = Layout(d, b)
-    list = assembled(d, b)
-    idle_parts = r"^(exit_idle_shaft|exit_idler_\d|idler_\d_orings|exit_idle_collar_.*)$"
-    results = Pair{String, Vector{Pair{String, Float64}}}[]
-    with_gmsh() do
-        gmsh.model.add("motion")
-        static = build_named!(list; keep = it -> !occursin(SWINGING, it.name))
-        arm = [it for it in list if occursin(SWINGING, it.name)]
-        for h in heights
-            Δθ = arm_turn(d, l, h)
-            moving = reduce(vcat, [swing!(it.build(true), it.name, l, Δθ) for it in arm])
-            # The pick roller's O-rings rest on the tray when it is empty, the feed shaft runs in the arms' hubs:
-            # those contacts are intended.
-            ignore = h <= 0 ? ["tray", "feed_shaft"] : ["feed_shaft"]
-            push!(results, "pick arm at $(h) mm" => collisions(moving, static; ignore))
-            occ().remove(moving, true)
-        end
-        names = [n for n in keys(static) if occursin(idle_parts, n)]
-        moving = reduce(vcat, [occ().copy(static[n]) for n in names])
-        occ().translate(moving, 0, 0, -l.lift)
-        others = Dict(n => t for (n, t) in static if !(n in names) && !startswith(n, "idler_spring"))
-        push!(results, "lower exit roller $(l.lift) mm down" => collisions(moving, others))
-    end
-    return results
+    arm = filter(n -> occursin(SWINGING, n), c.names)
+    # The pick roller's O-rings rest on the tray when it is empty, the feed shaft runs in the arms' hubs:
+    # those contacts are intended.
+    results = ["pick arm at $(h) mm" => collisions(c, Dict(n => swing_pose(n, l, arm_turn(d, l, h)) for n in arm);
+        ignore = h <= 0 ? ["tray", "feed_shaft"] : ["feed_shaft"], tolerance) for h in heights]
+    idle = Dict(n => Pose(Vec3f(0, 0, -l.lift)) for n in c.names if occursin(IDLE_PARTS, n))
+    springs = filter(n -> startswith(n, "idler_spring"), c.names)
+    return push!(results, "lower exit roller $(l.lift) mm down" => collisions(c, idle; ignore = springs, tolerance))
 end
 
 """
-    insertion_check(design, build)
+    insertion_check(c::RayChecks, design, build; reach = 400.0)
 
-Every shaft goes in along x through the plates once the frame stands. Sweeps each shaft from
-outside to its place and reports what it would hit on the way: only the parts it is meant to
-pass (its own hub and the collars snapped on later) may show up.
+Every shaft goes in along x through the plates once the frame stands. The volume each shaft's
+section sweeps from far outside to the far plate against the frame: only the parts it is meant
+to pass may show up.
 """
-function insertion_check(d::FeederDesign = FeederDesign(), b::Build = Build(); reach = 400.0)
+function insertion_check(c::RayChecks, d::FeederDesign = FeederDesign(), b::Build = Build(); reach = 400.0, tolerance = 0.5)
     l = Layout(d, b)
     o = d.inner_width / 2 + b.plate
-    list = assembled(d, b)
-    frame = it -> it.group == :frame || it.name == "pad_spring" || it.name == "pad_pin"
-    shafts = (("pick_shaft", l.pick, -1), ("feed_shaft", l.feed, -1), ("exit_drive_shaft", l.exit_up, 1),
-              ("exit_idle_shaft", l.exit_low, -1))
-    results = Pair{String, Vector{Pair{String, Float64}}}[]
-    with_gmsh() do
-        gmsh.model.add("insertion")
-        static = build_named!(list; keep = frame)
-        for (name, c, from) in shafts
-            # The swept volume: the shaft's section from far outside to the far plate.
-            x0, x1 = from < 0 ? (-reach, o) : (-o, reach)
-            swept = shaft!(b, c, x0, x1)
-            push!(results, "$name from $(from < 0 ? "left" : "right")" => collisions(swept, static))
-            occ().remove(swept, true)
-        end
+    frame = [it.name for it in assembled(d, b) if it.group == :frame || it.name in ("pad_spring", "pad_pin")]
+    I = Pose()
+    map((("pick_shaft", l.pick, -1), ("feed_shaft", l.feed, -1), ("exit_drive_shaft", l.exit_up, 1), ("exit_idle_shaft", l.exit_low, -1))) do (name, at, from)
+        x0, x1 = from < 0 ? (-reach, o) : (-o, reach)
+        swept = Traced(c.rays.backend, closed_surface(() -> shaft!(b, at, x0, x1)))
+        pairs = [n for n in frame if overlaps(moved_box(swept, I), box(c, n))]
+        v = shared(c.rays, [(swept, I, c.parts[n], I) for n in pairs])
+        "$name from $(from < 0 ? "left" : "right")" => [n => x for (n, x) in zip(pairs, v) if x > tolerance]
     end
-    return results
-end
-
-"Smallest distance between the solids `a` and `b` (mm); 0 where they touch or overlap."
-solid_distance(a, b) = minimum(occ().getDistance(i..., j...)[1] for i in a for j in b if i[1] == 3 && j[1] == 3)
-
-"""
-    box_window(box, other, u, L)
-
-The stretch of a move along `u` (from `L` before its place to its place) during which the
-moving bounding box `box` (taken at the place) meets `other`: `(near, far)`, or `nothing`.
-"""
-function box_window((lo, hi), (olo, ohi), u, L)
-    near, far = 0.0, L
-    for k in 1:3
-        # lo + t u ≤ ohi and olo ≤ hi + t u, for t in [0, L]
-        if abs(u[k]) < 1.0e-12
-            (lo[k] <= ohi[k] && olo[k] <= hi[k]) || return nothing
-        else
-            a, c = (ohi[k] - lo[k]) / u[k], (olo[k] - hi[k]) / u[k]
-            near, far = max(near, min(a, c)), min(far, max(a, c))
-        end
-    end
-    return near <= far ? (near, far) : nothing
 end
 
 """
-    sequence_check(design, build; plan = assembly_steps(design, build), steps = all, step = 1.5, tolerance = 0.5)
-
-Builds the feeder in the order of the assembly guide (or another `plan`) and makes every move
-its steps name (`AssemblyStep.moves`): the items of a move come in along their way, from where
-it starts to their place, against everything already in place (earlier steps, the step's base
-items and the moves before it in the same step). Against each item in place the move is
-followed over the stretch where their bounding boxes meet, at most `step` mm at a time; where
-the two are farther apart than that it jumps ahead by their distance, which cannot hide a
-contact. A press fit overlaps its mate at its place; on the way it must never overlap more
-than there. Returns, per move, each item it hits with the largest overlap beyond the one at its
-place (mm³) and the distances before its place between which that happens (mm).
+What moves along x as one, for `axial_check`: each shaft with the parts that turn with it and
+the clips in its grooves, the parts that turn on a shaft or post, and the pinion on the motor's
+shaft. Everything else stands: the frame and what is fixed to it.
 """
-function sequence_check(d::FeederDesign = FeederDesign(), b::Build = Build(); plan = assembly_steps(d, b), steps = nothing, step = 1.5,
-        tolerance = 0.5)
-    list = assembled(d, b)
-    done = Set{String}()
-    results = Pair{String, Vector{@NamedTuple{with::String, excess::Float64, from::Float64, to::Float64}}}[]
-    with_gmsh() do
-        for (k, s) in enumerate(plan)
-            if isnothing(steps) || k in steps
-                gmsh.model.add("sequence_$k")
-                placed = build_named!(list; keep = it -> (!s.apart && it.name in done) || occursin(s.base, it.name))
-                for (pattern, way) in s.moves
-                    group = [it for it in list if occursin(pattern, it.name) && !haskey(placed, it.name)]
-                    isempty(group) && continue
-                    solids = [it.build(true) for it in group]
-                    moving = reduce(vcat, solids)
-                    box = bounding_box(moving)
-                    L, u = norm(way), normalize(Vec3d(way))
-                    found = @NamedTuple{with::String, excess::Float64, from::Float64, to::Float64}[]
-                    for (n, tags) in placed
-                        window = box_window(box, bounding_box(tags), u, L)
-                        isnothing(window) && continue
-                        at_place = overlaps(box, bounding_box(tags)) ? shared(moving, tags) : 0.0
-                        worst, farthest, nearest = 0.0, 0.0, Inf
-                        position, t = 0.0, last(window)
-                        while true
-                            occ().translate(moving, ((t - position) * u)...)
-                            position = t
-                            distance = solid_distance(moving, tags)
-                            if distance <= 1.0e-6
-                                excess = shared(moving, tags) - at_place
-                                if excess > tolerance
-                                    worst, farthest, nearest = max(worst, excess), max(farthest, t), min(nearest, t)
-                                end
-                            end
-                            t == first(window) && break
-                            t = max(first(window), t - max(distance, step))
-                        end
-                        occ().translate(moving, (-position * u)...)
-                        worst > 0 && push!(found, (with = n, excess = round(worst; digits = 1), from = round(farthest; digits = 1),
-                            to = round(nearest; digits = 1)))
-                    end
-                    for (it, tags) in zip(group, solids)
-                        placed[it.name] = tags
-                    end
-                    push!(results, "$k. $(s.title): $(join(getfield.(group, :name), ", "))" => sort!(found; by = h -> -h.excess))
-                    @info "sequence_check" last(results)
+const AXIAL_BODIES = [
+    "feed shaft" => r"^(feed_shaft|feed_hub|feed_orings|feed_ratchet|feed_clip_.*)$",
+    "pick shaft" => r"^(pick_shaft|pick_hub|pick_orings|pick_ratchet|pick_clip_.*)$",
+    "driven exit shaft" => r"^(exit_drive_shaft|exit_hub_\d|exit_\d_orings|exit_drive_clip_.*)$",
+    "exit idler shaft" => r"^(exit_idle_shaft|exit_idler_\d|idler_\d_orings|exit_idle_clip_.*)$",
+    "feed cup gear" => r"^feed_cup_gear$", "pick cup gear" => r"^pick_cup_gear$",
+    "left arm" => r"^(arm_l|idler_clip)$", "right arm" => r"^arm_r$", "idler" => r"^idler$",
+    "pinion" => r"^drive_pinion$",
+]
+
+"The parts that slide on their shafts between their neighbours: hubs between clips, ratchets in their cups."
+const AXIAL_PARTS = [
+    "feed hub" => r"^feed_(hub|orings)$", "pick hub" => r"^pick_(hub|orings)$",
+    "exit hub 1" => r"^exit_(hub_1|1_orings)$", "exit hub 2" => r"^exit_(hub_2|2_orings)$",
+    "exit idler 1" => r"^(exit_idler_1|idler_1_orings)$", "exit idler 2" => r"^(exit_idler_2|idler_2_orings)$",
+    "feed ratchet" => r"^feed_ratchet$", "pick ratchet" => r"^pick_ratchet$",
+]
+
+"How far the feeder's shafts and what turns on them slide along x (`PrintSim.axial_check`)."
+PrintSim.axial_check(c::RayChecks, ::FeederDesign; kw...) = axial_check(c, AXIAL_BODIES, AXIAL_PARTS; kw...)
+
+"""
+    electronics_check(c::RayChecks, design, build; tolerance = 0.05)
+
+The bought boards and the room they need (`board_envelopes`: their parts, the motor plugs, the
+jumper wires and their bends, the USB-C plug and cable) against every printed part, for each
+board at its smallest and its largest, pushed into every corner of its pocket. Returns the
+volume each pair shares, mm³; empty when everything is clear.
+"""
+function electronics_check(c::RayChecks, d::FeederDesign = FeederDesign(), b::Build = Build(); tolerance = 0.05)
+    l = Layout(d, b)
+    printed_names = [it.name for it in assembled(d, b) if printed(it)]
+    I = Pose()
+    hits = NamedTuple{(:board, :size, :at, :part, :what, :volume), Tuple{String, Tuple{Float64, Float64}, Vec2d, String, Symbol, Float64}}[]
+    for bd in BOARDS
+        f = board_frame(d, l, bd)
+        for s in ((bd.size[1] - bd.spread[1], bd.size[2] - bd.spread[2]), (bd.size[1] + bd.spread[1], bd.size[2] + bd.spread[2])), kx in (-1, 1), ky in (-1, 1)
+            at = Vec2d(kx * (f.hx - s[1] / 2), ky * (f.hy - s[2] / 2))
+            for (what, build) in ((:room, () -> fuse_all!(board_envelopes(d, l, bd; size = s, at))), (:board, () -> board!(d, l, bd; size = s, at)))
+                part = Traced(c.rays.backend, closed_surface(build))
+                near = [n for n in printed_names if overlaps(moved_box(part, I), box(c, n))]
+                for (n, v) in zip(near, shared(c.rays, [(part, I, c.parts[n], I) for n in near]))
+                    v > tolerance && push!(hits, (board = bd.name, size = s, at = at, part = n, what = what, volume = v))
                 end
-                gmsh.model.remove()
             end
-            s.kept && union!(done, [it.name for it in list if first(step_role(s, it.name)) != :none])
         end
     end
-    return results
+    return hits
+end
+
+"""
+    cable_route_check(c::RayChecks, design, build; radius = 2.0)
+
+Each motor's lead along `cable_routes` as a tube (the five AWG 26 wires bundled, 4 mm thick)
+against every part of the feeder and against the circles the gears' teeth sweep (1 mm wider):
+the volume shared, mm³. The lead's first 2 mm leave the motor's housing and are left out.
+"""
+function cable_route_check(c::RayChecks, d::FeederDesign = FeederDesign(), b::Build = Build(); radius = 2.0, tolerance = 0.05)
+    l = Layout(d, b)
+    g = l.gearbox
+    G = GEAR_PLANES
+    span(u0, u1) = (left_x(d, b, u1), u1 - u0)
+    swing = swing_points(l.profile, d)
+    I = Pose()
+    # Teeth with 1 mm to spare, and what swings with the arm wherever it goes.
+    sweeps = ["pinion teeth" => () -> cylinder_x(g.motor, tip_radius(g.pinion) + 1.0, span(G.pinion...)...),
+        "feed gear teeth" => () -> cylinder_x(l.feed, tip_radius(g.feed) + 1.0, span(G.feed, G.feed + 13.5)...),
+        "pick gear teeth" => () -> fuse_all!(reduce(vcat, [cylinder_x(P, tip_radius(g.pick) + 1.0, span(G.pick, G.pick + 13.5)...) for P in swing])),
+        "idler teeth" => () -> fuse_all!(reduce(vcat, [cylinder_x(idler_center(g, l.feed, P), tip_radius(g.idler) + 1.0, span(G.idler...)...) for P in swing])),
+        "arm" => () -> fuse_all!(reduce(vcat, [cylinder_x(q, 9.0, span(G.arm...)...) for P in swing for q in (P, idler_center(g, l.feed, P))]))]
+    others = vcat([n => c.parts[n] for n in c.names if !startswith(n, "coupon")],
+        [name => Traced(c.rays.backend, closed_surface(build)) for (name, build) in sweeps])
+    hits = NamedTuple{(:motor, :part, :volume), Tuple{String, String, Float64}}[]
+    for r in cable_routes(d, b, l)
+        pts = r.points
+        path = vcat([pts[1] + 2.0 * normalize(pts[2] - pts[1])], pts[2:end])
+        tube = Traced(c.rays.backend, closed_surface(() -> fuse_all!(reduce(vcat,
+            [vcat([(3, occ().addCylinder(path[k]..., (path[k + 1] - path[k])..., radius))],
+                  k > 1 ? [(3, occ().addSphere(path[k]..., radius))] : Tuple{Int32, Int32}[]) for k in 1:(length(path) - 1)]))))
+        near = [(n, t) for (n, t) in others if n != r.board && overlaps(moved_box(tube, I), moved_box(t, I))]
+        for ((n, _), v) in zip(near, shared(c.rays, [(tube, I, t, I) for (_, t) in near]))
+            v > tolerance && push!(hits, (motor = r.motor, part = n, volume = v))
+        end
+    end
+    return hits
 end
 
 "Mass (g) and center of mass (mm) of solids, at density `ρ` g/mm³."
@@ -449,6 +284,13 @@ function strength_report(d::FeederDesign = FeederDesign(), b::Build = Build(), s
     θ = P * a * (span - 2a) / (2 * E_pla * I)                  # slope at the rollers
     row!("exit rollers out of parallel across their width", 2θ * b.exit_roller_length, 0.3, "mm")
     row!("exit shaft bending stress", P * a * c / I, 7.0, "MPa")
+    # The clips' grooves beside the rollers, where the shafts bend most: the round core the groove
+    # leaves, its stress raised three times by the groove's corners.
+    Ig, cg, Kt = π * CLIP.groove^4 / 4, CLIP.groove, 3.0
+    xg = b.roller_length / 2 + 0.5 + CLIP.thickness / 2
+    row!("feed shaft bending stress in a clip's groove", Kt * F / 2 * (span / 2 - xg) * cg / Ig, 7.0, "MPa")
+    row!("pick shaft bending stress in a clip's groove", Kt * Fp / 2 * (arms / 2 - xg) * cg / Ig, 7.0, "MPa")
+    row!("exit shaft bending stress in a clip's groove", Kt * P * a * cg / Ig, 7.0, "MPa")
     # Springs (PETG): stress at the working deflection, held against creep.
     for (name, leaf, force) in (("pad spring", PAD_LEAF, 2.0), ("idler spring", IDLER_LEAF, s.idler_force / 2))
         δ = deflection(leaf, force)
@@ -517,12 +359,12 @@ every item is projected from the camera (the phone's center, `camera_height` abo
 floor over the box's middle) onto the sheet lying in the box, for an empty box and one
 holding `pile` mm of paper. Returns, per pile height, the items whose shadow falls on the
 sheet's area (x within the sheet's width, y over the box's length), how many points do and
-the y range their shadow covers.
+the x and y ranges their shadow covers.
 """
 function camera_check(d::FeederDesign = FeederDesign(), b::Build = Build(); piles = (0.0, 15.0))
     camera = Vec3d(0.0, d.box_length / 2, d.camera_height)
     list = filter(it -> it.name != "phone", assembled(d, b))
-    hidden = Dict{Float64, Vector{NamedTuple{(:item, :points, :ys), Tuple{String, Int, NTuple{2, Float64}}}}}(z => [] for z in piles)
+    hidden = Dict{Float64, Vector{NamedTuple{(:item, :points, :xs, :ys), Tuple{String, Int, NTuple{2, Float64}, NTuple{2, Float64}}}}}(z => [] for z in piles)
     with_gmsh() do
         for it in list
             gmsh.model.add(it.name)
@@ -534,13 +376,13 @@ function camera_check(d::FeederDesign = FeederDesign(), b::Build = Build(); pile
             gmsh.model.remove()
             pts = [Vec3d(coords[3i - 2], coords[3i - 1], coords[3i]) for i in 1:(length(coords) ÷ 3)]
             for z in piles
-                shadow = Float64[]
+                shadow = Vec3d[]
                 for q in pts
                     (q[3] > z + 0.5 && q[3] < camera[3]) || continue
                     s = camera + (camera[3] - z) / (camera[3] - q[3]) * (q - camera)
-                    abs(s[1]) <= d.sheet_width / 2 && 0.0 <= s[2] <= d.box_length && push!(shadow, s[2])
+                    abs(s[1]) <= d.sheet_width / 2 && 0.0 <= s[2] <= d.box_length && push!(shadow, s)
                 end
-                isempty(shadow) || push!(hidden[z], (item = it.name, points = length(shadow), ys = extrema(shadow)))
+                isempty(shadow) || push!(hidden[z], (item = it.name, points = length(shadow), xs = extrema(first, shadow), ys = extrema(s -> s[2], shadow)))
             end
         end
     end

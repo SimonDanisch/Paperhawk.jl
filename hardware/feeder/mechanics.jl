@@ -7,15 +7,17 @@
 Construction details that the paper path does not fix: plate and shaft sizes, fits and the
 clearances the Bambu H2D needs. Printed holes come out up to 0.3 mm small on the H2D; the
 print simulation (`joint_report` on the parts rebuilt from the G-code) shows that turning fits
-need 0.4 mm and pockets 0.3 mm of clearance to stay free when faces swell by 0.1 mm. The
-tolerance coupon (`coupon!`) tries each fit 0.1 mm tighter and looser before the real parts.
+need 0.4 mm and pockets 0.3 mm of clearance to stay free when faces swell by 0.1 mm. Nothing
+holds by friction: parts that turn with a shaft slide onto its D with clearance `key` and the
+flat drives them, and clips in grooves keep them in place along it. The tolerance coupon
+(`coupon!`) tries each fit 0.1 mm tighter and looser before the real parts.
 """
 Base.@kwdef struct Build
     plate::Float64 = 8.0            # side plate thickness
     shaft::Float64 = 10.0           # D-shaft diameter
     flat::Float64 = 1.0             # depth of the shaft's flat
     bore::Float64 = 0.4             # radial clearance of a shaft turning in a plate
-    grip::Float64 = 0.0             # radial clearance of D-bores that hold a part on a shaft
+    key::Float64 = 0.25             # radial clearance of D-bores on a shaft: hubs, ratchets; the flat drives them
     slide::Float64 = 0.3            # clearance of parts sitting in pockets and slots
     pocket::Float64 = 3.0           # depth of the pockets in the plates for guides, tray and wall
     tie::Float64 = 12.0             # square tie bar
@@ -24,7 +26,7 @@ Base.@kwdef struct Build
     roller_length::Float64 = 30.0   # pick and feed roller
     exit_roller_length::Float64 = 16.0
     exit_rollers::NTuple{2, Float64} = (-55.0, 55.0)    # x of the exit roller pairs
-    socket::Float64 = 0.0           # radial play of the D-sockets on the 28BYJ-48's shaft: printed holes come out small
+    socket::Float64 = 0.15          # radial play of the D-sockets on the 28BYJ-48's shaft
 end
 
 """
@@ -32,15 +34,17 @@ end
 the README links) and the Rajguru datasheet; the shaft axis is the origin. Where the two
 differ, the worse value for a fit: the 1.8 mm boss (Rajguru: 1.5) and the 4.0 mm lug holes
 (Rajguru: 4.2 ± 0.15). The shaft protrudes 10 ± 0.5 mm from the mounting face and is flattened
-only over its outer 6 ± 0.2 mm; behind that it is round. The cable housing, 14.6 mm wide, covers
-the 16 mm of the body next to the mounting face and reaches 17.1 mm from the body's axis; the
-lead leaves it `cable_exit` = 3.5 mm behind the face (both drawings) and is 230 ± 10 mm long to
-its plug (Rajguru; ANGEEK: 230 ± 5). `lug_thickness` is in neither drawing.
+only over its outer 6 ± 0.2 mm; behind that it is round. The cable housing reaches 17.1 mm
+from the body's axis; the drawings give it 14.6 mm wide, three CAD models of the motor 14.6 (16.6
+over its ribs), 18 and 19 mm wide and 16.5, 17.5 and 18 mm deep from the mounting face, so it is
+drawn 19 wide and 18 deep. The lead leaves it `cable_exit` = 3.5 mm behind the face (both
+drawings) and is 230 ± 10 mm long to its plug (Rajguru; ANGEEK: 230 ± 5). `lug_thickness` is in
+neither drawing; the CAD models have 0.8 and 1.0 mm.
 """
 const BYJ48 = (body = 28.0, depth = 19.0, offset = 8.0, boss = 9.0, boss_height = 1.8,
     shaft = 5.0, flats = 3.0, shaft_length = 10.0, flat_length = 6.0, length_tolerance = 0.5, flat_tolerance = 0.2,
     holes = 35.0, holes_tolerance = 0.2, hole = 4.0, hole_min = 3.85, lug_width = 7.0, lug_thickness = 0.85,
-    cable_box = (14.6, 17.1, 16.0), cable_exit = 3.5, lead = 220.0)
+    cable_box = (19.0, 17.1, 18.0), cable_exit = 3.5, lead = 220.0)
 
 # --- profile-plane helpers ----------------------------------------------------------------------
 
@@ -70,28 +74,74 @@ lying on its flat, so the flat also orients the parts clamped on it.
 """
 shaft!(b::Build, c::Point2d, x0, x1; toward = Vec2d(0, -1)) = d_prism(c, b.shaft, b.flat, toward, x0, x1 - x0)
 
+"The D-bore of a part on a D-shaft, `key` wider all around, as a tool to cut."
+key_bore(b::Build, c::Point2d, x0, length; toward = Vec2d(0, -1), key = b.key) = d_prism(c, b.shaft + 2key, b.flat, toward, x0 - 1, length + 2)
+
 """
-A sleeve of outer `radius` and `length` on a D-shaft (a roller, a collar, a ratchet wheel): its
-bore is the shaft's D with clearance `b.grip`.
+A sleeve of outer `radius` and `length` on a D-shaft (a roller hub, a ratchet wheel): it slides
+on with clearance `b.key` and the shaft's flat drives it.
 """
 function sleeve!(b::Build, c::Point2d, radius, x0, length; toward = Vec2d(0, -1))
-    body = cylinder_x(c, radius, x0, length)
-    bore = d_prism(c, b.shaft + 2b.grip, b.flat - b.grip, toward, x0 - 1, length + 2)
-    return cut!(body, bore)
+    return cut!(cylinder_x(c, radius, x0, length), key_bore(b, c, x0, length; toward))
 end
 
 """
-A split collar that snaps over the shaft from the side and keeps a roller from sliding: a
-sleeve with a slot as wide as the shaft's flat chord minus a little, so it clicks into place.
+Retaining clip (PETG, mm): an E-clip that is pushed sideways into a groove of radius `groove`
+and `width` cut into a shaft and keeps what sits beside it from sliding along. Its inside is a
+circle of radius `inner`, open in a `mouth` as wide; the arms taper from `back` behind the shaft
+to `tip` at the mouth, so the bending spreads along them as they open over the groove
+(`clip_strain`). `thickness` along the shaft; it prints flat.
 """
-function collar!(b::Build, c::Point2d, x0; length = 5.0, radius = 8.0, toward = Vec2d(0, -1))
-    s = sleeve!(b, c, radius, x0, length; toward)
-    r = b.shaft / 2
-    slot = 2 * sqrt(r^2 - (r - b.flat)^2) - 0.6
-    away = -toward
-    side = Vec2d(-away[2], away[1])
-    gap = [c + slot / 2 * side, c + slot / 2 * side + (radius + 1) * away, c - slot / 2 * side + (radius + 1) * away, c - slot / 2 * side]
-    return cut!(s, prism(gap, x0 - 1, length + 2))
+const CLIP = (groove = 4.2, width = 2.0, thickness = 1.6, inner = 4.45, back = 2.4, tip = 1.4, mouth = 7.2)
+
+"""
+    clip!(c, x0, mouth)
+
+A clip around profile point `c` from `x0` to `x0 + CLIP.thickness`, open toward `mouth` (a unit
+vector in the profile plane): it comes from the other side and is pushed on along `mouth`.
+"""
+function clip!(c::Point2d, x0, mouth::Vec2d; n = 40)
+    k = CLIP
+    m = normalize(mouth)
+    s = Vec2d(-m[2], m[1])
+    αt = asin(k.mouth / 2 / k.inner)                 # the tips' inner corners, from the mouth's axis
+    radius(α) = k.inner + k.tip + (k.back - k.tip) * (π - abs(π - α) - αt) / (π - αt)
+    at(r, α) = c + r * (cos(α) * m + sin(α) * s)
+    αs = range(αt, 2π - αt; length = 2n + 1)
+    pts = vcat([at(radius(α), α) for α in αs], [at(k.inner, α) for α in reverse(αs)])
+    return prism(pts, x0, k.thickness)
+end
+
+"""
+    clip_strain(spread)
+
+Largest strain (%) in a clip whose mouth opens by `spread` mm to pass its groove: each arm a
+curved bar from the back to its tip, tapering as `CLIP` gives, loaded at the tip across the mouth
+(Castigliano), its inner fibre by Winkler's curved-bar formula. The material's stiffness drops out.
+"""
+function clip_strain(spread; n = 400)
+    k = CLIP
+    θt = acos(k.mouth / 2 / k.inner)                 # tips, from the axis across the mouth
+    θs = range(-π / 2, θt; length = n)
+    h(θ) = k.back + (k.tip - k.back) * (θ + π / 2) / (θt + π / 2)
+    R(θ) = k.inner + h(θ) / 2
+    lever(θ) = R(θt) * sin(θt) - R(θ) * sin(θ)
+    # Tip deflection per unit tip force times the stiffness: Σ lever² R dθ / I.
+    J = sum(lever(θ)^2 * R(θ) / (k.thickness * h(θ)^3 / 12) for θ in θs) * step(θs)
+    F = spread / 2 / J                                # tip force over the stiffness
+    function strain(θ)
+        ro, ri = R(θ) + h(θ) / 2, R(θ) - h(θ) / 2
+        rn = h(θ) / log(ro / ri)
+        return F * lever(θ) * (rn - ri) / (k.thickness * h(θ) * (R(θ) - rn) * ri)
+    end
+    return 100 * maximum(strain, θs)
+end
+
+"The groove for a clip whose low face is at `x0`, centered on it, as a tool to cut from a shaft of radius `r`."
+function groove(c::Point2d, x0, r)
+    k = CLIP
+    xg = x0 + k.thickness / 2 - k.width / 2
+    return cut!(cylinder_x(c, r + 1.0, xg, k.width), cylinder_x(c, k.groove, xg - 1, k.width + 2))
 end
 
 # --- gears --------------------------------------------------------------------------------------
@@ -194,12 +244,11 @@ end
 """
     ratchet!(b, c, x0, width; spin, teeth = 12, root = 8.0, tip = 9.0)
 
-The driven half of the freewheel: a ratchet wheel clamped on the roller's shaft end.
+The driven half of the freewheel: a ratchet wheel on the roller's shaft end, driven by its flat.
+It sits in its cup gear's pocket, which keeps it there along the shaft.
 """
 function ratchet!(b::Build, c::Point2d, x0, width; spin, teeth = 12, root = 8.0, tip = 9.0, toward = Vec2d(0, -1))
-    wheel = prism(ratchet_outline(c, root, tip, teeth, spin), x0, width)
-    bore = d_prism(c, b.shaft + 2b.grip, b.flat - b.grip, toward, x0 - 1, width + 2)
-    return cut!(wheel, bore)
+    return cut!(prism(ratchet_outline(c, root, tip, teeth, spin), x0, width), key_bore(b, c, x0, width; toward))
 end
 
 """
@@ -349,13 +398,13 @@ deflection(l::Leaf, F) = F / stiffness(l)
 
 """
 Where the drive sits outside the left plate, as distances (mm) out from its outer face: the pick
-arm, the pick roller's cup gear, the feed roller's cup gear and the collar that keeps it on the
-feed shaft, the arm's idler and its collar, the pinion and the drive motor's mounting face. Both
+arm, the pick roller's cup gear, the feed roller's cup gear and the clip that keeps it on the
+feed shaft, the arm's idler and its clip, the pinion and the drive motor's mounting face. Both
 cup gears open toward the plate, their ratchets inside. The pinion meshes the feed gear; the
 idler is wide enough to mesh both cup gears. The pick gear turns between the arm and the feed
 gear, the pick shaft ends in it: nothing on the pick shaft reaches the feed gear's plane.
 """
-const GEAR_PLANES = (arm = (0.5, 6.0), pick = 6.5, feed = 20.5, collar = 34.5, idler = (6.5, 28.0), idler_collar = 28.5,
+const GEAR_PLANES = (arm = (0.5, 6.0), pick = 6.5, feed = 20.5, clip = 34.5, idler = (6.5, 28.0), idler_clip = 28.5,
     pinion = (20.5, 38.5), face = 42.0)
 
 """
@@ -523,8 +572,9 @@ end
     arm!(d, b, l, side)
 
 One side of the pick arm, outside a side plate: a link from a hub that turns on the feed shaft to
-a bore the pick shaft turns in. The left one also holds the idler's shaft in a D-bore. Shown at
-the stack the layout shows.
+a bore the pick shaft turns in. The left one also carries the post the idler turns on, with the
+groove for the idler's clip near its end; the arm prints lying on its inner face, the post
+standing up from it. Shown at the stack the layout shows.
 """
 function arm!(d::FeederDesign, b::Build, l::Layout, side; width = 9.0)
     u0, u1 = GEAR_PLANES.arm
@@ -538,11 +588,13 @@ function arm!(d::FeederDesign, b::Build, l::Layout, side; width = 9.0)
     body = cut!(body, cylinder_x(P, b.shaft / 2 + b.bore, x0 - 1, t + 2))
     side > 0 && return body
     I = idler_center(l.gearbox, F, P)
-    return cut!(body, d_prism(I, b.shaft + 2b.grip, b.flat - b.grip, Vec2d(0, -1), x0 - 1, t + 2))
+    clip_x = left_x(d, b, GEAR_PLANES.idler_clip + CLIP.thickness)
+    post = cylinder_x(I, b.shaft / 2, clip_x - 2.0, x0 - clip_x + 2.0 + 0.01)
+    return fuse!(body, cut!(post, groove(I, clip_x, b.shaft / 2)))
 end
 
 """
-The arm's idler: as wide as both cup gears' teeth it meshes, turning on its shaft.
+The arm's idler: as wide as both cup gears' teeth it meshes, turning on the left arm's post.
 """
 function idler!(d::FeederDesign, b::Build, l::Layout)
     g = l.gearbox
@@ -664,11 +716,12 @@ function side_plate!(d::FeederDesign, b::Build, l::Layout, side)
     for c in l.ties
         append!(tools, prism(square(c, b.tie + 2b.slide), x0 - 1, t + 2))
     end
-    # Blind holes from the outer face: bracket pegs, motor lug pins, idler spring pegs.
+    # Blind holes from the outer face: bracket pegs, the pinion stop, motor lug pins, idler spring pegs.
     outer = side > 0 ? x1 : x0
     blind(c, r, depth) = cylinder_x(c, r, side > 0 ? outer - depth : outer - 1, depth + 1)
     if side < 0
         foreach(c -> append!(tools, blind(c, 3.05, 6.0)), gearbox_feet(l.gearbox))
+        append!(tools, blind(pinion_stop_at(l.gearbox), LUG_PIN_HOLE / 2, 7.0))
     else
         foreach(c -> append!(tools, blind(c, LUG_PIN_HOLE / 2, 7.0)), byj48_holes(l.exit_up, l.exit_turn))
     end
@@ -893,6 +946,22 @@ end
 const LUG_PIN = 3.2
 const LUG_PIN_HOLE = 3.1
 
+"Where the pinion stop stands: 8 mm from the pinion's axis toward the motor's body, inside its root circle."
+pinion_stop_at(g::Gearbox) = g.motor + 8.0 * g.turn
+
+"""
+    pinion_stop!(d, b, l)
+
+A post pressed into the left plate's outer face that ends 0.5 mm before the pinion's face: the
+pinion slides onto the motor's shaft with play, and this keeps it from walking off. It prints
+standing on its end.
+"""
+function pinion_stop!(d::FeederDesign, b::Build, l::Layout; radius = 3.0, peg = 6.0)
+    c = pinion_stop_at(l.gearbox)
+    face, plate = left_x(d, b, GEAR_PLANES.pinion[1] - 0.5), left_x(d, b, 0.0)
+    return fuse!(cylinder_x(c, radius, face, plate - face), cylinder_x(c, LUG_PIN / 2, plate - 0.01, peg + 0.01))
+end
+
 # --- springs and the pad ------------------------------------------------------------------------
 
 "The pad spring's leaf: PETG, printed lying on it."
@@ -1053,7 +1122,7 @@ pin holes of 3.8, 3.9 and 4.0 mm, and three sockets for the 28BYJ-48 shaft (the 
 `coupon_shaft` and try which fit turns, slides or holds.
 """
 function coupon!(b::Build; origin = Point2d(0, 0), x0 = 0.0, thickness = 8.0)
-    w, h = 90.0, 30.0
+    w, h = 126.0, 30.0
     o = origin
     body = prism([o, o + Vec2d(w, 0), o + Vec2d(w, h), o + Vec2d(0, h)], x0, thickness)
     for (k, c) in enumerate(b.bore .+ (-0.1, 0.0, 0.1))
@@ -1068,17 +1137,21 @@ function coupon!(b::Build; origin = Point2d(0, 0), x0 = 0.0, thickness = 8.0)
     for (k, dia) in enumerate(LUG_PIN_HOLE .+ (-0.1, 0.0, 0.1))
         body = cut!(body, cylinder_x(o + Vec2d(10 + 12(k - 1), 23), dia / 2, x0 - 1, thickness + 2))
     end
-    # Three sockets for the 28BYJ-48's shaft, with the design's play and 0.1 and 0.2 mm more.
-    for (k, play) in enumerate(b.socket .+ (0.0, 0.1, 0.2))
+    # Three sockets for the 28BYJ-48's shaft, with the design's play and 0.1 mm less and more.
+    for (k, play) in enumerate(b.socket .+ (-0.1, 0.0, 0.1))
         # The motor's face against the coupon's top: the socket from there down through the coupon.
         body = cut!(body, motor_socket(o + Vec2d(80, 7 + 8(k - 1)), x0 + thickness + BYJ48.boss_height, -1; play))
+    end
+    # Three D-holes for the coupon's shaft, as on the hubs and ratchets and 0.1 mm either way.
+    for (k, key) in enumerate(b.key .+ (-0.1, 0.0, 0.1))
+        body = cut!(body, key_bore(b, o + Vec2d(93 + 13(k - 1), 12), x0, thickness; key))
     end
     return body
 end
 
-"A 50 mm piece of D-shaft, a 2 mm test strip and a lug pin for the coupon."
+"A 50 mm piece of D-shaft with a clip's groove 8 mm from its end, a 2 mm test strip and a lug pin for the coupon."
 function coupon_shaft!(b::Build; origin = Point2d(0, -20), x0 = 0.0)
-    s = shaft!(b, origin, x0, x0 + 50)
+    s = cut!(shaft!(b, origin, x0, x0 + 50), groove(origin, x0 + 42, b.shaft / 2))
     bottom = -(b.shaft / 2 - b.flat)                     # the shaft lies on its flat; the strip and the pin stand beside it
     strip2 = prism([origin + Vec2d(10, bottom), origin + Vec2d(12, bottom), origin + Vec2d(12, bottom + 10), origin + Vec2d(10, bottom + 10)], x0, 22.0)
     z = origin[2] + bottom
@@ -1092,39 +1165,45 @@ end
 cylinder_z(x, y, z0, h, r) = [(3, occ().addCylinder(x, y, z0, 0, 0, h, r))]
 
 """
-The bought boards on the electronics carrier, as their listings and product photos give them:
-the PCB's size (x, y) and how far it may differ, the height of the corner shelves it rests on,
-the corner zones (x, y) on top and below where there is nothing but the corner holes (the
-clamp's fingers and the shelves stay inside them), and where its center is: `x`, and `dy` from
-the carrier's middle. `hole` is a corner hole's center, in x and y from the board's corner,
-and its radius.
+The bought boards on the electronics carrier, as their listings, product photos and CAD models
+give them: the PCB's size (x, y) and how far it may differ, the height of the corner shelves it
+rests on, the corner zones (x, y) on top and below where there is nothing but the corner holes
+(the clamp's fingers and the shelves stay inside them), how far the shelves (`ledge`) and the
+fingers (`finger`) reach in from the pocket's corner, and where its center is: `x`, and `dy` from
+the carrier's middle. `hole` is a corner hole's center, in x and y from the board's corner, and
+its radius.
 
-- ULN2003 driver (ANGEEK ZC-A0591): 35.5 × 31.4 mm per the listing; holes in all four corners,
-  the motor socket at least 3.4 mm in from the edges, the nearest solder joints 5 mm. Solder
-  side 2.5 mm deep, so both rest 4 mm up, toward the box, near their motors' cable slots.
+- ULN2003 driver (ANGEEK ZC-A0591): 35.5 × 31.4 mm per the listing, 35.1 × 31.5 in a CAD model
+  of the board (escornabot); holes in all four corners, the motor socket at least 3.4 mm in from
+  the edges, the nearest solder joints 5 mm. Solder side 2.5 mm deep, so both rest 4 mm up,
+  toward the box, near their motors' cable slots.
 - ESP32 DevKit (MiMiU, 30 pin, USB-C, CP2102): 28.4 × 51.3 mm, measured on the listing's
-  straight top photo against the 2.54 mm pin pitch: header rows 25.4 mm apart, first pin 10 mm
-  from the USB end, the EN and BOOT buttons 4.4 mm in from the long edges, the USB-C socket
-  2.1 mm past the end, holes in all four corners. Its header pins point down; jumper housings
+  straight top photo against the 2.54 mm pin pitch; CAD models of this board style are
+  28.0 × 51.4 (DOIT, micro USB) and 29.0 × 52.0 mm (USB-C), so the pocket takes 28.2 to 29.1 ×
+  51.1 to 52.2 (on a narrower board the jumper housings would stand past its long edges and
+  meet the posts). Header rows 25.4 mm apart (at their pitch from the middle, whatever the width),
+  first pin 10 mm from the USB end, the last pin's solder joints 4.9 mm from the other end, the EN
+  and BOOT buttons 4.4 mm in from the long edges, the USB-C socket 3.4 mm high and up to 2.1 mm
+  past the end, holes in all four corners. Its header pins point down; jumper housings
   (2.5 + 14 mm) and the wires' bends need 23 mm, so it rests 24 mm up, USB end to the back (−y).
 """
 const BOARDS = (
-    (name = "uln2003_drive", x = -84.0, dy = 14.0, size = (35.5, 31.4), spread = (0.3, 0.3), shelf = 4.0, clear = (top = (3.0, 3.0), bottom = (4.0, 4.0)), hole = (2.75, 2.5, 1.6), usb = false),
-    (name = "esp32", x = -35.0, dy = -6.0, size = (28.4, 51.3), spread = (0.3, 0.6), shelf = 24.0, clear = (top = (4.0, 8.0), bottom = (8.0, 4.0)), hole = (2.3, 2.55, 1.5), usb = true),
-    (name = "uln2003_exit", x = 84.0, dy = 19.0, size = (35.5, 31.4), spread = (0.3, 0.3), shelf = 4.0, clear = (top = (3.0, 3.0), bottom = (4.0, 4.0)), hole = (2.75, 2.5, 1.6), usb = false),
+    (name = "uln2003_drive", x = -84.0, dy = 14.0, size = (35.4, 31.45), spread = (0.4, 0.35), shelf = 4.0, clear = (top = (3.0, 3.0), bottom = (4.0, 4.0)),
+        ledge = (3.0, 3.0), finger = (2.7, 2.7), hole = (2.75, 2.5, 1.6), usb = false),
+    (name = "esp32", x = -35.0, dy = -6.0, size = (28.65, 51.65), spread = (0.45, 0.55), shelf = 24.0, clear = (top = (4.0, 4.5), bottom = (8.0, 4.0)),
+        ledge = (4.5, 3.5), finger = (3.6, 4.0), hole = (2.4, 2.6, 1.6), usb = true),
+    (name = "uln2003_exit", x = 84.0, dy = 19.0, size = (35.4, 31.45), spread = (0.4, 0.35), shelf = 4.0, clear = (top = (3.0, 3.0), bottom = (4.0, 4.0)),
+        ledge = (3.0, 3.0), finger = (2.7, 2.7), hole = (2.75, 2.5, 1.6), usb = false),
 )
 
 """
-How the boards are held, in mm: `fit` is the play per side around the largest board; each
-corner has a post `post` square outside the pocket's side along x and a `wall` thick end wall
-reaching `leg` along the pocket's end; shelves reach `shelf` under each corner; the clamp frame stands `lift`
-above the nominal board, is `frame` thick, and its fingers reach `finger` (x, y) over the corners;
-its pegs (`LUG_PIN`, `peg` long) press into `hole` deep holes in the posts.
+How the boards are held, in mm: the pocket is `fit` plus half the spread wider per side than the
+largest board; each corner has a post `post` square outside the pocket's side along x and a
+`wall` thick end wall reaching `leg` along the pocket's end; the clamp frame stands `lift` above
+the nominal board and is `frame` thick; its pegs (`LUG_PIN`, `peg` long) press into `hole` deep
+holes in the posts.
 """
-const HOLDER = (fit = 0.15, post = 6.5, wall = 2.0, leg = 4.0, shelf = 3.0, lift = 0.4, frame = 2.4,
-    finger = Dict("uln2003" => (2.4, 2.4), "esp32" => (2.6, 3.0)), peg = 3.5, hole = 4.0, pcb = 1.6)
-
-finger_reach(bd) = HOLDER.finger[startswith(bd.name, "uln") ? "uln2003" : "esp32"]
+const HOLDER = (fit = 0.15, post = 6.5, wall = 2.0, leg = 4.0, lift = 0.4, frame = 2.4, peg = 3.5, hole = 4.0, pcb = 1.6)
 
 """
     board_frame(d, l, bd)
@@ -1186,7 +1265,7 @@ function electronics_carrier!(d::FeederDesign, b::Build, l::Layout)
         f = board_frame(d, l, bd)
         for (P, (sx, sy)) in f.corners
             z0 = c.top - 0.01
-            body = fuse!(body, span_box(P, P - Vec2d(sx * h.shelf, sy * h.shelf), z0, f.shelf))                    # shelf
+            body = fuse!(body, span_box(P, P - Vec2d(sx * bd.ledge[1], sy * bd.ledge[2]), z0, f.shelf))            # shelf
             body = fuse!(body, span_box(P, P + Vec2d(sx * h.post, -sy * h.post), z0, f.top))                       # post beside the board
             body = fuse!(body, span_box(P - Vec2d(sx * h.leg, 0), P + Vec2d(sx * h.post, sy * h.wall), z0, f.top))  # end wall
         end
@@ -1207,7 +1286,7 @@ the plug. It prints upside down, flat on its top.
 function board_clamp!(d::FeederDesign, l::Layout, bd)
     h = HOLDER
     f = board_frame(d, l, bd)
-    fx, fy = finger_reach(bd)
+    fx, fy = bd.finger
     z0, z1 = f.top, f.top + h.frame
     C = f.center
     ring = span_box(C - Vec2d(f.hx + h.post, f.hy + h.wall), C + Vec2d(f.hx + h.post, f.hy + h.wall), z0, z1)
@@ -1241,10 +1320,10 @@ function board!(d::FeederDesign, l::Layout, bd; size = bd.size, at = Vec2d(0, 0)
     if !bd.usb
         return fuse!(pcb, span_box(C - Vec2d(sx / 2 - 4, sy / 2 - 4), C + Vec2d(sx / 2 - 4, sy / 2 - 4), top - 0.01, top + 11.0))
     end
-    pcb = fuse!(pcb, span_box(C - Vec2d(sx / 2 - 5, sy / 2 - 9), C + Vec2d(sx / 2 - 5, sy / 2 - 1), top - 0.01, top + 3.2))
-    pcb = fuse!(pcb, span_box(C + Vec2d(-4.5, -sy / 2 - 2.1), C + Vec2d(4.5, -sy / 2 + 7.5), top - 0.01, top + 3.2))   # USB-C socket
+    pcb = fuse!(pcb, span_box(C - Vec2d(sx / 2 - 5, sy / 2 - 9), C + Vec2d(sx / 2 - 5, sy / 2 - 1), top - 0.01, top + 3.3))
+    pcb = fuse!(pcb, span_box(C + Vec2d(-4.6, -sy / 2 - 2.1), C + Vec2d(4.6, -sy / 2 + 7.5), top - 0.01, top + 3.4))   # USB-C socket
     for side in (-1, 1)                                   # header rows with jumper housings below
-        x = C[1] + side * (sx / 2 - 1.45)
+        x = C[1] + side * 25.4 / 2
         pcb = fuse!(pcb, span_box(Point2d(x - 1.27, C[2] - sy / 2 + 8.8), Point2d(x + 1.27, C[2] - sy / 2 + 46.8), z - 16.5, z + 0.01))
     end
     return pcb
@@ -1272,7 +1351,7 @@ function board_envelopes(d::FeederDesign, l::Layout, bd; size = bd.size, at = Ve
     end
     out = cross(bd.clear.top, top + 0.01, top + 6.0)
     for side in (-1, 1)
-        x = C[1] + side * (sx / 2 - 1.45)
+        x = C[1] + side * 25.4 / 2
         append!(out, span_box(Point2d(x - 1.4, C[2] - sy / 2 + 8.6), Point2d(x + 1.4, C[2] - sy / 2 + 47.0), z - 16.5 - 6.0, z - 0.01))
     end
     socket = C[2] - sy / 2 - 2.1

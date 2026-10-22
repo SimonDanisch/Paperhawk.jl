@@ -60,37 +60,37 @@ Lift the tray's back end a little and set the stand under it, its two pegs into 
 
 ## 10. Feed roller
 
-Hold the feed hub under the upper guide's front end with a collar beside it on each side, lift the pad with a finger and push the feed shaft in from the left through both plates, threading the collar, the hub and the other collar onto it. Turn each of them until its flat inside lines up with the shaft's flat.
+Hold the feed hub under the upper guide's front end, lift the pad with a finger and push the feed shaft in from the left through both plates and the hub, the hub's flat inside lined up with the shaft's flat. Slide the hub between the two grooves near the shaft's middle and push a clip into each, beside the hub: a clip goes on sideways, open side first, and clicks into its groove.
 
 ![Step 10](assembly/step_10.jpg)
 
 ## 11. Pick arm and roller
 
-Put an arm onto each end of the feed shaft, outside the plates, the left one with the boss for the idler. Hold the pick hub over the tray with a collar beside it on each side and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, a collar, the hub, the other collar, the right plate's slot and the right arm. Push a collar onto the pick shaft's right end and one onto the feed shaft's right end, outside the right arm.
+Put an arm onto each end of the feed shaft, outside the plates, the left one with the post for the idler. Hold the pick hub over the tray and push the pick shaft in from the left: through the left arm, the arc slot in the left plate, the hub, the right plate's slot and the right arm. Slide the hub, its flat lined up with the shaft's, between the two grooves near the shaft's middle and push a clip into each, beside the hub. Push a clip into the groove of the pick shaft and of the feed shaft outside the right arm.
 
 ![Step 11](assembly/step_11.jpg)
 
 ## 12. Freewheels
 
-Push the pick ratchet onto the pick shaft's left end, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then its collar. The pick cup gear needs no collar of its own: the feed cup gear covers its outer face and keeps it on its shaft with 0.5 mm of play.
+Push the pick ratchet onto the pick shaft's left end, its flat lined up with the shaft's, up to the arm, and slide the pick cup gear over it, pocket first, turning it back and forth until its pawl drops in front of a ratchet tooth. The same on the feed shaft, one plane further out: ratchet, feed cup gear, then a clip into the groove outside it. The pick cup gear needs no clip of its own: the feed cup gear covers its outer face and keeps it on its shaft with 0.5 mm of play.
 
 ![Step 12](assembly/step_12.jpg)
 
 ## 13. Idler
 
-Press the idler shaft into the D-hole of the left arm's top, slide the idler onto it until its teeth mesh both cup gears (turn it a little if a tooth sits on a tooth) and snap on its collar.
+Slide the idler onto the left arm's post until its teeth mesh both cup gears (turn it a little if a tooth sits on a tooth) and push a clip into the groove at the post's end.
 
 ![Step 13](assembly/step_13.jpg)
 
 ## 14. Exit rollers
 
-Push the driven exit shaft in from the right through both exit hubs, threading a collar onto it on each side of each hub; its right end stays flush with the plate. Push a collar onto its left end, outside the left plate. Push the idler shaft in from the left through its slots, threading a collar just inside each plate and one on each side of each idler roller. Turn every collar and roller until its flat inside lines up with the shaft's flat. Then press the two idler springs into the outer faces of the plates so they push the idler shaft up.
+Push the driven exit shaft in from the right through both plates and both exit hubs, each hub's flat lined up with the shaft's; its right end stays flush with the plate. Slide each hub between its two grooves and push a clip into each, beside the hub, then a clip into the groove just inside the left plate and one into the groove outside it. Push the idler shaft in from the left through its slots and both idler rollers the same way; its clips go on from the front, beside each roller and just inside each plate. Then press the two idler springs into the outer faces of the plates so they push the idler shaft up.
 
 ![Step 14](assembly/step_14.jpg)
 
 ## 15. Drive motor
 
-Push the pinion onto the drive motor's shaft. Pin the motor to its bracket with the two lug pins. Press the bracket's pegs into the left plate, the pinion's teeth into the feed cup gear; turn the pinion a little if a tooth sits on a tooth.
+Press the pinion stop's peg into its hole in the left plate, beside the feed cup gear. Push the pinion onto the drive motor's shaft, its flat inside lined up with the shaft's flats. Pin the motor to its bracket with the two lug pins. Press the bracket's pegs into the left plate, the pinion's teeth into the feed cup gear; turn the pinion a little if a tooth sits on a tooth. The stop keeps the pinion on the motor's shaft.
 
 ![Step 15](assembly/step_15.jpg)
 

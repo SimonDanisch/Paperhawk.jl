@@ -38,3 +38,7 @@
 	path = dev/JuliaVision
 	url = https://github.com/SimonDanisch/JuliaVision
 	branch = sd/mantle-dev
+[submodule "dev/PrintSim"]
+	path = dev/PrintSim
+	url = https://github.com/SimonDanisch/PrintSim.jl
+	branch = main
