@@ -10,10 +10,13 @@ The interface is in German.
 
 ## What you need
 
-- **Linux** with Julia 1.12. Only Linux is tested.
-- **A GPU with Vulkan**, Float16 and Int8 shader support: a recent NVIDIA or
-  AMD card. Reading pages takes about 2 GB of GPU memory; the optional
-  summaries take about 6 GB more.
+- **Julia 1.12** on Linux, Windows or macOS.
+- **A GPU.** Everything runs through
+  [Mantle](https://github.com/SimonDanisch/Mantle.jl), which runs the same
+  Julia kernels on any GPU: Vulkan on Linux and Windows (NVIDIA, AMD, Intel),
+  Metal on Apple silicon. Paperhawk takes the best device it finds; `--gpu`
+  picks another. Reading pages takes about 2 GB of GPU memory, the optional
+  summaries about 6 GB more.
 - **An Android phone** with USB debugging on, and `adb` installed. Nothing is
   installed on the phone: Paperhawk streams its camera through the scrcpy
   server (`assets/scrcpy-server`). The default camera size, 4624×3472, is the
@@ -74,8 +77,8 @@ German).
 - **Archiving:** numbered PDFs with a text layer, a SQLite full-text index, and
   a summary by Ternary-Bonsai-2 27B through `BonsaiRunner`.
 
-GPU work runs through [Mantle](https://github.com/SimonDanisch/Mantle.jl) on
-Vulkan, written in Julia with KernelAbstractions. The image operations are
+GPU work is written in Julia with KernelAbstractions and runs through
+[Mantle](https://github.com/SimonDanisch/Mantle.jl) on Vulkan or Metal. The image operations are
 JuliaVision's `GPUFiltering`; Paperhawk keeps only the page's own kernels.
 
 ## Tests
