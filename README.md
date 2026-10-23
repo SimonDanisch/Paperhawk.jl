@@ -21,27 +21,45 @@ The interface is in German.
 
 ## Install
 
-The GPU stack is not registered yet, so it comes along as submodules:
+The GPU stack is not registered yet. Paperhawk is developed in a working folder
+that holds one Julia environment and, under `dev/`, Paperhawk and the stack's
+repositories side by side:
 
-```sh
-git clone --recursive https://github.com/SimonDanisch/Paperhawk.jl
-cd Paperhawk.jl
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-```
+| `dev/`               | Repository                                                                                  | Branch                |
+|----------------------|---------------------------------------------------------------------------------------------|-----------------------|
+| `Paperhawk`          | [SimonDanisch/Paperhawk.jl](https://github.com/SimonDanisch/Paperhawk.jl)                   | `main`                |
+| `JuliaVision`        | [SimonDanisch/JuliaVision](https://github.com/SimonDanisch/JuliaVision)                     | `sd/mantle-dev`       |
+| `Mantle`             | [SimonDanisch/Mantle.jl](https://github.com/SimonDanisch/Mantle.jl)                         | `sd/lava-refactor`    |
+| `Lava`               | [SimonDanisch/Lava.jl](https://github.com/SimonDanisch/Lava.jl)                             | `sd/lava-refactor`    |
+| `KernelAbstractions` | [SimonDanisch/KernelAbstractions.jl](https://github.com/SimonDanisch/KernelAbstractions.jl) | `sd/lava-refactor`    |
+| `Metal`              | [SimonDanisch/Metal.jl](https://github.com/SimonDanisch/Metal.jl)                           | `sd/lava-refactor`    |
+| `GPUArrays`          | [JuliaGPU/GPUArrays.jl](https://github.com/JuliaGPU/GPUArrays.jl)                           | `main`                |
+| `Vulkan`             | [JuliaGPU/Vulkan.jl](https://github.com/JuliaGPU/Vulkan.jl)                                 | `sd/vk1.4`            |
+| `VulkanCore`         | [JuliaGPU/VulkanCore.jl](https://github.com/JuliaGPU/VulkanCore.jl)                         | `sd/vk1.4`            |
+| `CompilerCaching`    | [SimonDanisch/CompilerCaching.jl](https://github.com/SimonDanisch/CompilerCaching.jl)       | `sd/published-invoke` |
+| `Raycore`            | [JuliaGeometry/Raycore.jl](https://github.com/JuliaGeometry/Raycore.jl)                     | `sd/with-texture`     |
+| `PrintSim`           | [SimonDanisch/PrintSim.jl](https://github.com/SimonDanisch/PrintSim.jl)                     | `main`                |
+
+The environment's `Project.toml` lists them in `[sources]` with
+`path = "dev/<name>"` (the runners as `dev/JuliaVision/<runner>`), and Makie,
+GLMakie, RayMakie and ComputePipeline with `rev = "sd/lava-refactor"` from
+[Makie.jl](https://github.com/MakieOrg/Makie.jl). PrintSim and RayMakie are
+only needed for the [sheet feeder](hardware/feeder).
 
 The model weights download on first use.
 
 ## Run
 
 ```sh
-julia --project=. tools/scanner.jl                    # the best GPU
-julia --project=. tools/scanner.jl --gpu "RTX 4000"   # a particular one
-julia --project=. tools/scanner.jl --classify         # with LLM summaries
+julia --project=. dev/Paperhawk/tools/scanner.jl                    # the best GPU
+julia --project=. dev/Paperhawk/tools/scanner.jl --gpu "RTX 4000"   # a particular one
+julia --project=. dev/Paperhawk/tools/scanner.jl --classify         # with LLM summaries
 ```
 
-Drafts and the archive live in `~/Documents/Paperhawk`, outside the
-repository. See [docs/gui.md](docs/gui.md) for the scanner and
-[docs/archive.md](docs/archive.md) for the archive (both in German).
+All commands run in the working folder. Drafts and the archive live in
+`~/Documents/Paperhawk`, outside the repository. See [docs/gui.md](docs/gui.md)
+for the scanner and [docs/archive.md](docs/archive.md) for the archive (both in
+German).
 
 ## How it works
 
@@ -63,7 +81,7 @@ JuliaVision's `GPUFiltering`; Paperhawk keeps only the page's own kernels.
 ## Tests
 
 ```sh
-julia --project=. -e 'using Pkg; Pkg.test()'
+julia --project=. -e 'using Pkg; Pkg.test("Paperhawk")'
 ```
 
 The tests need the GPU and a display (GLMakie opens windows).

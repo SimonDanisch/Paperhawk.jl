@@ -1,4 +1,4 @@
-# julia --project=. tools/scanner.jl [--gpu NAME] [--classify] [--no-torch] [draft-dir] [archive-dir]
+# julia --project=. dev/Paperhawk/tools/scanner.jl [--gpu NAME] [--classify] [--no-torch] [draft-dir] [archive-dir]
 #
 # Opens the scanner and returns when its window is closed. `--gpu` names the
 # GPU by a part of its name, as `--gpu "RTX 4000"`; without it the best one is

@@ -10,8 +10,8 @@ Seitenansicht; der sichtbare Ausschnitt wird bis zur vollen Auflösung nachgelad
 ## Starten
 
 ```sh
-julia --project=. tools/scanner.jl                    # beste GPU
-julia --project=. tools/scanner.jl --gpu "RTX 4000"   # eine bestimmte GPU
+julia --project=. dev/Paperhawk/tools/scanner.jl                    # beste GPU
+julia --project=. dev/Paperhawk/tools/scanner.jl --gpu "RTX 4000"   # eine bestimmte GPU
 ```
 
 Weitere Optionen: `--classify` lässt das lokale LLM archivierte Dokumente

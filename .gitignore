@@ -1,9 +1,5 @@
-# Local clones in dev/ that the project does not use: the registered versions
-# of these suffice. The others in dev/ are submodules.
-/dev/AcceleratedKernels/
-/dev/Adapt/
-/dev/ColorTypes/
-/dev/GeometryBasics/
+# The environment and the unregistered GPU stack live outside this repository.
+Manifest.toml
 # Editor and agent state.
 /.bonitoAgents/
 /.bt-attachments/

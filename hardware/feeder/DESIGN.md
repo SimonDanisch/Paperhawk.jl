@@ -8,7 +8,7 @@ Everything here is generated from Julia code and checked by simulation before pr
 `mechanics.jl` and `assembly.jl` (parts), `checks.jl` (collisions, motion, assembly,
 strength), `printchecks.jl` (the parts as printed), `render.jl` and `guide.jl` (the
 pictures), `firmware/feeder/feeder.ino` (ESP32). The generic part lives in the
-[PrintSim](../../dev/PrintSim) package: Gmsh solids, Bambu Studio projects, the parts rebuilt
+[PrintSim](https://github.com/SimonDanisch/PrintSim.jl) package: Gmsh solids, Bambu Studio projects, the parts rebuilt
 from Bambu Studio's G-code, the GPU ray checks and the assembly pictures. The feeder hands it
 its parts, joints and assembly steps.
 

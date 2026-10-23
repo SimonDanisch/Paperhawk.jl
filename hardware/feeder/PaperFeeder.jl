@@ -3,7 +3,7 @@ Design, simulation and CAD of Paperhawk's automatic sheet feeder. Print files, t
 simulation, the GPU checks and the assembly pictures come from PrintSim, with the feeder's
 items, joints and assembly steps.
 
-    include("hardware/feeder/PaperFeeder.jl")
+    include("dev/Paperhawk/hardware/feeder/PaperFeeder.jl")
     using .PaperFeeder, PrintSim
     design = FeederDesign()
     sim = FeederSim(design, FeedSettings())

@@ -49,7 +49,7 @@ end
 end
 
 @testset "page layout measured on the GPU" begin
-    letter = load(joinpath(pkgdir(Paperhawk), "dev", "JuliaVision", "PPOCRRunner", "test", "letter.png"))
+    letter = load(pkgdir(Paperhawk.PPOCRRunner, "test", "letter.png"))
     page = fill(RGB{N0f8}(1, 1, 1), 2000, 1500)   # [x, y]
     lh, lw = size(letter)
     page[101:100 + lw, 301:300 + lh] .= RGB{N0f8}.(permutedims(letter))

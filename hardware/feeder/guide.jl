@@ -2,8 +2,8 @@
 # CAD models, its leads, and the picture of the whole machine for the README.
 #
 #     studio = feeder_studio()
-#     feeder_guide(studio, "hardware/feeder/assembly")
-#     machine_picture(studio, "hardware/feeder/assembly/feeder.jpg")
+#     feeder_guide(studio, "dev/Paperhawk/hardware/feeder/assembly")
+#     machine_picture(studio, "dev/Paperhawk/hardware/feeder/assembly/feeder.jpg")
 
 "The bought and household parts, by name: NBR O-rings, the motors' steel cans, solder-masked boards, cork, paper."
 bought_materials() = [
